@@ -88,3 +88,4 @@ async def close_tunnel(proc: asyncio.subprocess.Process | None) -> None:
             proc.kill()
         except Exception:
             pass
+
