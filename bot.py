@@ -284,15 +284,33 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_join(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     u, msg = update.effective_user, update.effective_message
     if not config.JOIN_CODE:
-        await msg.reply_text("Joining is disabled. Ask the owner.")
+        await msg.reply_text("Joining is disabled. Ask the store owner.")
         return
     code = ctx.args[0] if ctx.args else ""
     if not hmac.compare_digest(code.encode(), config.JOIN_CODE.encode()):
-        await msg.reply_text("❌ Wrong code.")
+        await msg.reply_text("❌ Wrong code. Ask the store owner for the cashier join code.")
         return
-    db.upsert_user(u.id, u.full_name, u.username, "owner" if is_owner(u.id) else "waiter")
-    await msg.reply_html("✅ You're registered!\n\n" + WAITER_HELP)
-    await notify_owners(ctx.bot, f"👤 New waiter joined: <b>{H(u.full_name)}</b> (id <code>{u.id}</code>)")
+    custom_name = " ".join(ctx.args[1:]).strip() if len(ctx.args) > 1 else ""
+    cashier_name = f"{custom_name} ({u.full_name})" if custom_name else u.full_name
+    db.upsert_user(u.id, cashier_name, u.username, "owner" if is_owner(u.id) else "waiter")
+    await msg.reply_html(f"✅ Registered as <b>{H(cashier_name)}</b>!\n\n" + WAITER_HELP)
+    await notify_owners(ctx.bot, f"👤 <b>New cashier joined:</b> {H(cashier_name)} (ID: <code>{u.id}</code>)")
+
+
+async def cmd_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    u, msg = update.effective_user, update.effective_message
+    if not can_submit(u.id):
+        await msg.reply_html("You're not registered. Send <code>/join CODE</code> first.")
+        return
+    if not ctx.args:
+        await msg.reply_html("Usage: <code>/name Counter 1</code> or <code>/name Counter 2 - Meron</code>")
+        return
+    new_name = " ".join(ctx.args).strip()
+    user = db.get_user(u.id)
+    role = user["role"] if user else "waiter"
+    db.upsert_user(u.id, new_name, u.username, role)
+    await msg.reply_html(f"✅ Your cashier / counter name is now set to: <b>{H(new_name)}</b>")
+    await notify_owners(ctx.bot, f"👤 Cashier updated name: <b>{H(new_name)}</b> (ID: <code>{u.id}</code>)")
 
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -344,8 +362,6 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         ctx.user_data["awaiting_amount"] = pid
     if checking:
         start_checks(ctx, [pid], sent, {pid: extra}, u.full_name)
-    else:
-        await notify_owner_payment(ctx.bot, pid)
     else:
         await notify_owner_payment(ctx.bot, pid)
 
@@ -516,22 +532,23 @@ async def cmd_waiters(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     waiters = db.list_waiters()
     if not waiters:
         await update.effective_message.reply_html(
-            f"No waiters yet. They join with <code>/join {H(config.JOIN_CODE or 'CODE')}</code>")
+            f"No cashiers registered yet. Cashiers join by sending <code>/join {H(config.JOIN_CODE or 'CODE')} [Counter Name]</code>")
         return
-    lines = ["👥 <b>Waiters</b>"]
+    lines = ["👥 <b>Registered Cashiers & Counters</b>"]
     for w in waiters:
-        lines.append(f"{'🟢' if w['active'] else '⚪️'} {H(w['name'])} — <code>{w['tg_id']}</code>")
-    lines.append("\nRemove: /remove &lt;id&gt;")
+        status_icon = "🟢 Active" if w["active"] else "⚪️ Inactive"
+        lines.append(f"• {status_icon}: <b>{H(w['name'])}</b> (ID: <code>{w['tg_id']}</code>)")
+    lines.append("\nDeactivate a cashier: <code>/remove &lt;id&gt;</code>")
     await update.effective_message.reply_html("\n".join(lines))
 
 
 @owner_only
 async def cmd_remove(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not ctx.args or not ctx.args[0].isdigit():
-        await update.effective_message.reply_text("Usage: /remove <waiter id> (see /waiters)")
+        await update.effective_message.reply_text("Usage: /remove <cashier id> (see /cashiers)")
         return
     ok = db.set_user_active(int(ctx.args[0]), False)
-    await update.effective_message.reply_text("✅ Removed." if ok else "No waiter with that id.")
+    await update.effective_message.reply_text("✅ Deactivated." if ok else "No cashier with that ID.")
 
 
 # ------------------------------------------------------------------ scheduled + setup
@@ -552,11 +569,19 @@ async def setup_owner_chat(bot, owner_id: int) -> None:
         log.info("Owner %s chat setup skipped: %s", owner_id, e)
 
 
-WAITER_COMMANDS = [BotCommand("today", "My entries today"), BotCommand("undo", "Delete my last entry"),
-                   BotCommand("help", "How to send payments")]
-OWNER_COMMANDS = [BotCommand("report", "Open dashboard"), BotCommand("summary", "Today's totals"),
-                  BotCommand("export", "CSV export"), BotCommand("waiters", "List waiters"),
-                  BotCommand("help", "Help")] + WAITER_COMMANDS[:2]
+WAITER_COMMANDS = [
+    BotCommand("today", "My sales today"),
+    BotCommand("name", "Set counter / cashier name"),
+    BotCommand("undo", "Delete last entry"),
+    BotCommand("help", "How to submit payments"),
+]
+OWNER_COMMANDS = [
+    BotCommand("report", "Open live dashboard"),
+    BotCommand("summary", "Today's sales by cashier & bank"),
+    BotCommand("export", "Download CSV spreadsheet"),
+    BotCommand("cashiers", "List cashiers & counters"),
+    BotCommand("help", "Help & instructions"),
+] + WAITER_COMMANDS[:3]
 
 
 async def setup_bot(app: Application) -> None:
@@ -597,13 +622,14 @@ def build_application() -> Application:
     private = filters.ChatType.PRIVATE
     app.add_handler(CommandHandler("start", cmd_start, private))
     app.add_handler(CommandHandler("join", cmd_join, private))
+    app.add_handler(CommandHandler("name", cmd_name, private))
     app.add_handler(CommandHandler("help", cmd_help, private))
     app.add_handler(CommandHandler("today", cmd_today, private))
     app.add_handler(CommandHandler("undo", cmd_undo, private))
     app.add_handler(CommandHandler("report", cmd_report, private))
     app.add_handler(CommandHandler("summary", cmd_summary, private))
     app.add_handler(CommandHandler("export", cmd_export, private))
-    app.add_handler(CommandHandler("waiters", cmd_waiters, private))
+    app.add_handler(CommandHandler(["cashiers", "waiters"], cmd_waiters, private))
     app.add_handler(CommandHandler("remove", cmd_remove, private))
     app.add_handler(MessageHandler(private & (filters.PHOTO | filters.Document.IMAGE), on_photo))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_text))
