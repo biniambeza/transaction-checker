@@ -248,46 +248,49 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
 
-def account_matches(shown: str | None) -> bool | None:
-    """Compares a (usually masked) account like 'ETB-6076', '1*********6076' or '2519****3344' with MY_ACCOUNTS."""
-    if not config.MY_ACCOUNTS or not shown:
+def account_matches(shown: str | None, accounts: list[str] | None = None) -> bool | None:
+    """Compares a (usually masked) account like 'ETB-6076', '1*********6076' or '2519****3344'."""
+    acc_list = accounts if accounts is not None else config.MY_ACCOUNTS
+    if not acc_list or not shown:
         return None
     groups = re.findall(r"\d+", shown)
     tail = groups[-1] if groups else ""
     if len(tail) < 3:
         return None
-    for acc in config.MY_ACCOUNTS:
-        n = min(len(tail), len(acc), 9)
-        if tail[-n:] == acc[-n:]:
+    for acc in acc_list:
+        clean_acc = re.sub(r"\D", "", acc)
+        n = min(len(tail), len(clean_acc), 9)
+        if clean_acc and tail[-n:] == clean_acc[-n:]:
             return True
     return False
 
 
-def name_matches(name: str | None) -> bool | None:
-    if not config.MY_NAMES or not name:
+def name_matches(name: str | None, names: list[str] | None = None) -> bool | None:
+    name_list = names if names is not None else config.MY_NAMES
+    if not name_list or not name:
         return None
     words = set(re.findall(r"[a-z]+", name.lower()))
-    for mine in config.MY_NAMES:
+    for mine in name_list:
         my_words = set(re.findall(r"[a-z]+", mine.lower()))
         if my_words and len(words & my_words) >= min(2, len(my_words)):
             return True
     return False
 
 
-def receiver_ok(r: Receipt) -> bool | None:
-    acc = account_matches(r.receiver_account)
-    return acc if acc is not None else name_matches(r.receiver)
+def receiver_ok(r: Receipt, accounts: list[str] | None = None, names: list[str] | None = None) -> bool | None:
+    acc = account_matches(r.receiver_account, accounts)
+    return acc if acc is not None else name_matches(r.receiver, names)
 
 
 def receiver_label(r: Receipt) -> str:
     return " ".join(x for x in (r.receiver, f"({r.receiver_account})" if r.receiver_account else None) if x) or "?"
 
 
-def offline_flags(r: Receipt) -> list[str]:
+def offline_flags(r: Receipt, accounts: list[str] | None = None, names: list[str] | None = None) -> list[str]:
     """Problems visible on the receipt itself."""
     flags = []
-    if receiver_ok(r) is False:
-        flags.append(f"Paid to {receiver_label(r)} — not your supermarket account!")
+    if receiver_ok(r, accounts, names) is False:
+        flags.append(f"Paid to {receiver_label(r)} — not the business account!")
     if r.time:
         now = config.now_utc()
         if now - r.time > timedelta(hours=config.MAX_RECEIPT_AGE_HOURS):
@@ -346,9 +349,10 @@ def parse_cbe_pdf(text: str, ref: str) -> Receipt:
     return r
 
 
-async def _check_cbe(r: Receipt) -> Receipt | None:
+async def _check_cbe(r: Receipt, cbe_accounts: list[str] | None = None) -> Receipt | None:
+    cbe_accs = cbe_accounts if cbe_accounts is not None else config.CBE_ACCOUNTS
     suffixes = [r.suffix] if r.suffix else []
-    suffixes += [acc[-8:] for acc in config.CBE_ACCOUNTS]
+    suffixes += [acc[-8:] for acc in cbe_accs if len(acc) >= 8]
     for suffix in dict.fromkeys(suffixes):
         url = f"https://apps.cbe.com.et:100/?id={r.ref}{suffix}"
         status, body = await _get(url, insecure_fallback=True)
@@ -475,7 +479,8 @@ async def _check_receipt_page(r: Receipt) -> tuple[Receipt | None, str]:
     return found, text
 
 
-def _compare(bank: str, found: Receipt, claimed: float | None, expected_ref: str | None = None) -> BankCheck:
+def _compare(bank: str, found: Receipt, claimed: float | None, expected_ref: str | None = None,
+             accounts: list[str] | None = None, names: list[str] | None = None) -> BankCheck:
     m = config.money
     problems = []
     if found.status and found.status.lower() not in ("completed", "success", "successful"):
@@ -484,8 +489,8 @@ def _compare(bank: str, found: Receipt, claimed: float | None, expected_ref: str
         problems.append(f"bank code {found.ref} ≠ code on the receipt {expected_ref}")
     if found.amount is not None and claimed is not None and abs(found.amount - claimed) > 0.009:
         problems.append(f"bank amount {m(found.amount)} ≠ claimed {m(claimed)}")
-    if receiver_ok(found) is False:
-        problems.append(f"paid to {receiver_label(found)}, not your account")
+    if receiver_ok(found, accounts, names) is False:
+        problems.append(f"paid to {receiver_label(found)}, not the business account")
     if found.time and config.now_utc() - found.time > timedelta(hours=config.MAX_RECEIPT_AGE_HOURS):
         problems.append(f"payment date {found.time:%Y-%m-%d %H:%M} is old")
     if problems:
@@ -497,7 +502,8 @@ def _compare(bank: str, found: Receipt, claimed: float | None, expected_ref: str
     return BankCheck("ok", msg, found)
 
 
-async def check_online(r: Receipt, claimed: float | None) -> BankCheck:
+async def check_online(r: Receipt, claimed: float | None, accounts: list[str] | None = None,
+                       names: list[str] | None = None) -> BankCheck:
     """Looks the transaction up on the bank's own site and compares amount, receiver and date."""
     bank = r.bank or guess_bank_from_ref(r.ref)
     if not config.BANK_CHECK:
@@ -516,20 +522,29 @@ async def check_online(r: Receipt, claimed: float | None) -> BankCheck:
             if re.search(r"not found|invalid|expired|does not exist", text, re.I):
                 return BankCheck("not_found", f"{bank}: the bank says this receipt does not exist")
             return BankCheck("error", f"{bank}: receipt page opened but couldn't be read (saved for review)")
-        return _compare(bank, found, claimed, r.ref)
+        return _compare(bank, found, claimed, r.ref, accounts=accounts, names=names)
 
     if not r.ref:
         if r.url:
             return BankCheck("unsupported", f"{bank or 'Bank'}: transaction code not read — open the bank receipt link "
                                             "to check, or have the waiter type the code")
         return BankCheck("unsupported", "No transaction code to check")
-    if bank == "CBE" and not (r.suffix or config.CBE_ACCOUNTS):
-        return BankCheck("unsupported", "CBE: add your CBE account number to MY_ACCOUNTS to enable checks")
-    checker = {"CBE": _check_cbe, "telebirr": _check_telebirr}.get(bank)
-    if checker is None:
+
+    cbe_accs = [re.sub(r"\D", "", a) for a in (accounts or config.CBE_ACCOUNTS) if len(re.sub(r"\D", "", a)) == 13 and re.sub(r"\D", "", a).startswith("1")]
+    if bank == "CBE" and not (r.suffix or cbe_accs):
+        return BankCheck("unsupported", "CBE: add your 13-digit CBE account to enable automatic bank checks")
+    
+    if bank == "CBE":
+        checker_func = lambda rec: _check_cbe(rec, cbe_accounts=cbe_accs)
+    elif bank == "telebirr":
+        checker_func = _check_telebirr
+    else:
+        checker_func = None
+
+    if checker_func is None:
         return BankCheck("unsupported", f"{bank or 'This bank'}: no automatic check — owner checks manually")
     try:
-        found = await checker(r)
+        found = await checker_func(r)
     except asyncio.TimeoutError:
         return BankCheck("error", f"{bank}: bank site did not answer (try again later)")
     except aiohttp.ClientError as e:
@@ -537,4 +552,4 @@ async def check_online(r: Receipt, claimed: float | None) -> BankCheck:
         return BankCheck("error", f"{bank}: could not reach the bank site ({e.__class__.__name__})")
     if found is None:
         return BankCheck("not_found", f"{bank}: transaction {r.ref} NOT FOUND at the bank")
-    return _compare(bank, found, claimed)
+    return _compare(bank, found, claimed, accounts=accounts, names=names)

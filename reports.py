@@ -8,9 +8,22 @@ import db
 
 
 def format_summary(s: dict) -> str:
-    m = config.money
+    biz_name = s.get("business_name") or "Supermarket"
+    curr = s.get("currency") or config.CURRENCY or "ETB"
+    period_type = s.get("period_type", "day")
+    val = s.get("period_value") or s.get("day", "")
+
+    if period_type == "year":
+        period_lbl = f"Yearly Report — {val}"
+    elif period_type == "month":
+        period_lbl = f"Monthly Report — {val}"
+    else:
+        period_lbl = f"Daily Report — {val}"
+
+    m = lambda val: f"{val:,.2f} {curr}" if val is not None else f"0.00 {curr}"
+
     lines = [
-        f"📊 <b>Supermarket Daily Sales — {s['day']}</b>",
+        f"📊 <b>{html.escape(biz_name)} — {period_lbl}</b>",
         "━━━━━━━━━━━━━━━━━━━━",
         f"🧾 Total Transactions: <b>{s['count']}</b>",
         f"💰 <b>Total Sales Claimed:</b> <b>{m(s['claimed']['total'])}</b> ({s['claimed']['count']} sales)",
@@ -29,7 +42,7 @@ def format_summary(s: dict) -> str:
         lines.append(f"❓ Missing amount: {s['missing_amount']}")
     if s["missing_ref"]:
         lines.append(f"❓ Missing transaction code: {s['missing_ref']}")
-    if s["bank_total"] is not None:
+    if s.get("bank_total") is not None:
         diff = s["difference"]
         icon = "✅" if abs(diff) < 0.01 else "🔴"
         lines.append(f"🏦 Bank Statement Total: {m(s['bank_total'])} → Difference {icon} <b>{m(diff)}</b>")
@@ -40,26 +53,52 @@ def format_summary(s: dict) -> str:
             lines.append(f"• <b>{html.escape(b['bank'])}:</b> {m(b['total'])} ({b['count']} sales)")
 
     if s.get("by_waiter"):
-        lines.append("\n🛒 <b>By Cashier / Counter:</b>")
+        lines.append("\n🛒 <b>By Cashier / Waiter:</b>")
         for w in s["by_waiter"]:
             verif_str = f" (✅ {m(w['verified'])} verified)" if w["verified"] else ""
             lines.append(f"• <b>{html.escape(w['name'])}:</b> {m(w['total'])} ({w['count']} sales{verif_str})")
 
+    if s.get("by_customer"):
+        lines.append("\n👤 <b>Top Customers:</b>")
+        for c in s["by_customer"][:5]:
+            lines.append(f"• <b>{html.escape(c['name'])}:</b> {m(c['total'])} ({c['count']} payments)")
+
     return "\n".join(lines)
 
 
-def csv_bytes(day: str) -> bytes:
+def csv_bytes(period_value: str, business_id: int | None = None, period_type: str = "day") -> bytes:
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["id", "day", "time", "waiter", "bank", "transaction_ref", "amount", "status",
-                     "bank_check", "bank_check_details", "problems", "payer", "receiver", "receiver_account",
+    writer.writerow(["id", "business_id", "business_name", "day", "time", "waiter", "customer_payer",
+                     "bank", "transaction_ref", "amount", "currency", "status", "bank_check",
+                     "bank_check_details", "problems", "receiver", "receiver_account",
                      "receipt_time", "duplicate_of", "type", "receipt_link", "qr_data", "text", "note"])
-    for p in db.payments_for_day(day):
-        writer.writerow([p["id"], p["day"], config.local_datetime(p["created_at"]), p["waiter_name"],
-                         p["bank"] or "", p["tx_ref"] or "", "" if p["amount"] is None else f"{p['amount']:.2f}",
-                         p["status"], p["bank_check"] or "", p["bank_check_msg"] or "", p["flags"] or "",
-                         p["payer"] or "", p["receiver"] or "", p["receiver_account"] or "",
-                         config.local_datetime(p["receipt_time"]) if p["receipt_time"] else "",
-                         p["duplicate_of"] or "", p["kind"], p["receipt_url"] or "", p["qr_data"] or "",
-                         p["raw_text"] or "", p["note"] or ""])
-    return ("﻿" + buf.getvalue()).encode("utf-8")  # BOM so Excel opens it correctly
+    payments = db.payments_for_period(business_id, period_type, period_value)
+    for p in payments:
+        writer.writerow([
+            p["id"],
+            p.get("business_id") or "",
+            p.get("business_name") or "",
+            p["day"],
+            config.local_datetime(p["created_at"]),
+            p.get("waiter_name") or "",
+            p.get("payer") or "",
+            p.get("bank") or "",
+            p.get("tx_ref") or "",
+            "" if p.get("amount") is None else f"{p['amount']:.2f}",
+            p.get("business_currency") or config.CURRENCY,
+            p["status"],
+            p.get("bank_check") or "",
+            p.get("bank_check_msg") or "",
+            p.get("flags") or "",
+            p.get("receiver") or "",
+            p.get("receiver_account") or "",
+            config.local_datetime(p["receipt_time"]) if p.get("receipt_time") else "",
+            p.get("duplicate_of") or "",
+            p["kind"],
+            p.get("receipt_url") or "",
+            p.get("qr_data") or "",
+            p.get("raw_text") or "",
+            p.get("note") or "",
+        ])
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")  # BOM so Excel opens UTF-8 correctly

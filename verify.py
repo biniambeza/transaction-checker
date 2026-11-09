@@ -31,7 +31,12 @@ async def check_payment(pid: int) -> banks.BankCheck | None:
     if not p:
         return None
     r = receipt_from_payment(p)
-    result = await banks.check_online(r, p["amount"])
+
+    biz = db.get_business(p.get("business_id")) if p.get("business_id") else None
+    accounts = [a.strip() for a in (biz["accounts"] or "").split(",") if a.strip()] if biz else None
+    names = [n.strip() for n in (biz["names"] or "").split(",") if n.strip()] if biz else None
+
+    result = await banks.check_online(r, p["amount"], accounts=accounts, names=names)
     changes = {"bank_check": result.status, "bank_check_msg": result.message,
                "checked_at": config.now_utc().isoformat()}
     found = result.receipt
@@ -47,10 +52,13 @@ async def check_payment(pid: int) -> banks.BankCheck | None:
             changes["amount"] = found.amount
         if not p["tx_ref"] and found.ref:
             changes["tx_ref"] = found.ref
-            dup = db.find_duplicate(found.ref, pid)
+            dup, same_biz = db.find_duplicate(found.ref, pid, p.get("business_id"))
             if dup:
                 changes["duplicate_of"] = dup["id"]
                 p["duplicate_of"] = dup["id"]
+                if not same_biz:
+                    existing_f = (p.get("flags") or "")
+                    changes["flags"] = (existing_f + "; " if existing_f else "") + f"Reused receipt: already redeemed at another business (#{dup['id']})"
     if (result.status == "ok" and config.AUTO_VERIFY and p["status"] == "pending"
             and not p["duplicate_of"] and not p.get("flags")):
         changes["status"] = "verified"

@@ -1,4 +1,4 @@
-"""Dashboard server for the Telegram Mini App (owner only, authenticated with Telegram initData)."""
+"""Dashboard server for the Telegram Mini App (authenticated with Telegram initData)."""
 import hashlib
 import hmac
 import json
@@ -12,6 +12,7 @@ from aiohttp import web
 import banks
 import config
 import db
+import pdf_report
 import reports
 import verify
 
@@ -48,10 +49,31 @@ async def auth_middleware(request: web.Request, handler):
     if request.path.startswith("/api/"):
         init_data = request.headers.get("X-Telegram-Init-Data") or request.query.get("auth", "")
         user = check_init_data(init_data)
-        if not user or user.get("id") not in config.OWNER_IDS:
-            raise web.HTTPUnauthorized(text="Open this dashboard from the Telegram bot (owners only).")
+        if not user:
+            raise web.HTTPUnauthorized(text="Open this dashboard from the Telegram bot (invalid authentication).")
+        uid = user.get("id")
+        if not (db.is_superadmin(uid) or len(db.get_user_owned_businesses(uid)) > 0):
+            raise web.HTTPUnauthorized(text="Access restricted: only registered business owners can access this dashboard.")
         request["user"] = user
     return await handler(request)
+
+
+def get_req_business(request: web.Request) -> dict:
+    uid = request["user"]["id"]
+    bid_str = request.query.get("business_id")
+    if bid_str and bid_str.isdigit():
+        bid = int(bid_str)
+        biz = db.get_business(bid)
+        if biz and (db.is_superadmin(uid) or db.is_business_owner(bid, uid)):
+            return biz
+    owned = db.get_user_owned_businesses(uid)
+    if owned:
+        return owned[0]
+    if db.is_superadmin(uid):
+        all_b = db.list_businesses()
+        if all_b:
+            return all_b[0]
+    raise web.HTTPForbidden(text="No accessible business found for your account.")
 
 
 def _day(request: web.Request) -> str:
@@ -63,16 +85,32 @@ def _day(request: web.Request) -> str:
 
 def _serialize(p: dict) -> dict:
     return {
-        "id": p["id"], "day": p["day"], "time": config.local_time(p["created_at"]),
-        "waiter": p["waiter_name"], "waiter_id": p["waiter_id"], "kind": p["kind"],
-        "has_photo": bool(p["photo_path"]), "qr_data": p["qr_data"], "raw_text": p["raw_text"],
-        "ocr_text": (p["ocr_text"] or "")[:1500] or None, "tx_ref": p["tx_ref"], "amount": p["amount"],
-        "status": p["status"], "duplicate_of": p["duplicate_of"], "note": p["note"],
-        "bank": p.get("bank"), "receipt_url": p.get("receipt_url"), "payer": p.get("payer"),
-        "receiver": p.get("receiver"), "receiver_account": p.get("receiver_account"),
+        "id": p["id"],
+        "business_id": p.get("business_id"),
+        "business_name": p.get("business_name"),
+        "day": p["day"],
+        "time": config.local_time(p["created_at"]),
+        "waiter": p.get("waiter_name") or f"Cashier {p['waiter_id']}",
+        "waiter_id": p["waiter_id"],
+        "kind": p["kind"],
+        "has_photo": bool(p["photo_path"]),
+        "qr_data": p["qr_data"],
+        "raw_text": p["raw_text"],
+        "ocr_text": (p["ocr_text"] or "")[:1500] or None,
+        "tx_ref": p["tx_ref"],
+        "amount": p["amount"],
+        "status": p["status"],
+        "duplicate_of": p["duplicate_of"],
+        "note": p["note"],
+        "bank": p.get("bank"),
+        "receipt_url": p.get("receipt_url"),
+        "payer": p.get("payer"),
+        "receiver": p.get("receiver"),
+        "receiver_account": p.get("receiver_account"),
         "receipt_time": config.local_datetime(p["receipt_time"]) if p.get("receipt_time") else None,
         "flags": [f for f in (p.get("flags") or "").split("; ") if f],
-        "bank_check": p.get("bank_check"), "bank_check_msg": p.get("bank_check_msg"),
+        "bank_check": p.get("bank_check"),
+        "bank_check_msg": p.get("bank_check_msg"),
         "problem": db.has_problem(p),
     }
 
@@ -81,15 +119,91 @@ async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEBAPP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
+async def api_businesses(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    is_admin = db.is_superadmin(uid)
+    businesses = db.list_businesses() if is_admin else db.get_user_owned_businesses(uid)
+    return web.json_response({
+        "businesses": businesses,
+        "is_superadmin": is_admin
+    })
+
+
+async def api_report_data(request: web.Request) -> web.Response:
+    biz = get_req_business(request)
+    period_type = request.query.get("period_type", "day").lower()
+    if period_type not in ("day", "month", "year"):
+        period_type = "day"
+
+    period_val = request.query.get("period_value", "").strip()
+    if not period_val:
+        today = config.business_day()
+        if period_type == "day":
+            period_val = today
+        elif period_type == "month":
+            period_val = today[:7]
+        else:
+            period_val = today[:4]
+
+    rows = db.payments_for_period(biz["id"], period_type, period_val)
+    summary = db.summary(business_id=biz["id"], period_type=period_type, period_value=period_val, rows=rows)
+
+    return web.json_response({
+        "business": biz,
+        "currency": biz.get("currency") or config.CURRENCY,
+        "period_type": period_type,
+        "period_value": period_val,
+        "summary": summary,
+        "payments": [_serialize(p) for p in rows],
+        "recent_periods": {
+            "days": db.recent_days(biz["id"]),
+            "months": db.recent_months(biz["id"]),
+            "years": db.recent_years(biz["id"]),
+        }
+    })
+
+
+async def api_pdf(request: web.Request) -> web.Response:
+    biz = get_req_business(request)
+    period_type = request.query.get("period_type", "day").lower()
+    if period_type not in ("day", "month", "year"):
+        period_type = "day"
+
+    period_val = request.query.get("period_value", "").strip()
+    if not period_val:
+        today = config.business_day()
+        period_val = today if period_type == "day" else (today[:7] if period_type == "month" else today[:4])
+
+    rows = db.payments_for_period(biz["id"], period_type, period_val)
+    summary = db.summary(business_id=biz["id"], period_type=period_type, period_value=period_val, rows=rows)
+    title = f"{period_type.capitalize()} Report — {period_val}"
+
+    pdf_bytes = await pdf_report.generate_pdf(biz, summary, rows, title)
+    filename = f"report_{biz['code']}_{period_val}.pdf"
+    return web.Response(
+        body=pdf_bytes,
+        content_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
 async def api_days(request: web.Request) -> web.Response:
-    return web.json_response({"today": config.business_day(), "days": db.recent_days(),
-                              "currency": config.CURRENCY})
+    biz = get_req_business(request)
+    return web.json_response({
+        "today": config.business_day(),
+        "days": db.recent_days(biz["id"]),
+        "currency": biz.get("currency") or config.CURRENCY
+    })
 
 
 async def api_day(request: web.Request) -> web.Response:
+    biz = get_req_business(request)
     day = _day(request)
-    rows = db.payments_for_day(day)
-    return web.json_response({"summary": db.summary(day, rows), "payments": [_serialize(p) for p in rows]})
+    rows = db.payments_for_period(biz["id"], "day", day)
+    return web.json_response({
+        "summary": db.summary(business_id=biz["id"], period_type="day", period_value=day, rows=rows),
+        "payments": [_serialize(p) for p in rows]
+    })
 
 
 async def api_update_payment(request: web.Request) -> web.Response:
@@ -97,6 +211,11 @@ async def api_update_payment(request: web.Request) -> web.Response:
     p = db.get_payment(pid)
     if not p:
         raise web.HTTPNotFound(text="No such entry")
+
+    uid = request["user"]["id"]
+    if not (db.is_superadmin(uid) or db.is_business_owner(p.get("business_id", 1), uid)):
+        raise web.HTTPForbidden(text="Not authorized to edit this payment")
+
     body = await request.json()
     changes = {}
     if "status" in body:
@@ -120,7 +239,7 @@ async def api_update_payment(request: web.Request) -> web.Response:
             if not p.get("bank"):
                 changes["bank"] = banks.guess_bank_from_ref(ref)
         changes["tx_ref"] = ref
-        dup = db.find_duplicate(ref, pid) if ref else None
+        dup, _ = db.find_duplicate(ref, pid, p.get("business_id")) if ref else (None, True)
         changes["duplicate_of"] = dup["id"] if dup else None
     if body.get("clear_duplicate"):
         changes["duplicate_of"] = None
@@ -130,17 +249,24 @@ async def api_update_payment(request: web.Request) -> web.Response:
 
 async def api_bank_check(request: web.Request) -> web.Response:
     pid = int(request.match_info["pid"])
-    if not db.get_payment(pid):
+    p = db.get_payment(pid)
+    if not p:
         raise web.HTTPNotFound(text="No such entry")
+    uid = request["user"]["id"]
+    if not (db.is_superadmin(uid) or db.is_business_owner(p.get("business_id", 1), uid)):
+        raise web.HTTPForbidden(text="Not authorized")
     await verify.check_payment(pid)
     return web.json_response(_serialize(db.get_payment(pid)))
 
 
 async def api_verify_all(request: web.Request) -> web.Response:
-    return web.json_response({"updated": db.verify_all_pending(_day(request))})
+    biz = get_req_business(request)
+    day = _day(request)
+    return web.json_response({"updated": db.verify_all_pending(day, business_id=biz["id"])})
 
 
 async def api_bank_total(request: web.Request) -> web.Response:
+    biz = get_req_business(request)
     day = _day(request)
     body = await request.json()
     value = body.get("bank_total")
@@ -148,15 +274,21 @@ async def api_bank_total(request: web.Request) -> web.Response:
         total = None if value in (None, "") else round(float(value), 2)
     except (TypeError, ValueError):
         raise web.HTTPBadRequest(text="Bad amount")
-    db.set_bank_total(day, total)
-    return web.json_response(db.summary(day))
+    db.set_bank_total(biz["id"], day, total)
+    return web.json_response(db.summary(business_id=biz["id"], period_type="day", period_value=day))
 
 
 async def api_export(request: web.Request) -> web.Response:
+    biz = get_req_business(request)
     day = _day(request)
     bot = request.app[BOT_KEY]
-    await bot.send_document(request["user"]["id"], document=reports.csv_bytes(day),
-                            filename=f"payments_{day}.csv", caption=f"Payments {day}")
+    csv_bytes = reports.csv_bytes(day, business_id=biz["id"], period_type="day")
+    await bot.send_document(
+        request["user"]["id"],
+        document=csv_bytes,
+        filename=f"payments_{biz['code']}_{day}.csv",
+        caption=f"Payments {biz['name']} ({day})"
+    )
     return web.json_response({"ok": True})
 
 
@@ -175,6 +307,9 @@ async def start_web(bot) -> web.AppRunner:
     app[BOT_KEY] = bot
     app.add_routes([
         web.get("/", index),
+        web.get("/api/businesses", api_businesses),
+        web.get("/api/report-data", api_report_data),
+        web.get("/api/pdf", api_pdf),
         web.get("/api/days", api_days),
         web.get("/api/day/{day}", api_day),
         web.post("/api/day/{day}/verify-all", api_verify_all),
