@@ -41,6 +41,11 @@ if not exist ".venv\browser_installed.txt" (
 
 if not exist ".env" copy ".env.example" ".env" >nul
 
+if not exist "cloudflared.exe" (
+    echo Downloading cloudflared for Telegram WebApp dashboard...
+    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'cloudflared.exe'" 2>nul
+)
+
 echo Starting the bot... press Ctrl+C to stop.
 ".venv\Scripts\python.exe" main.py
 echo.

@@ -7,6 +7,7 @@ from telegram import Update
 import config
 import db
 from bot import build_application, setup_bot
+import tunnel
 from web import start_web
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
@@ -16,8 +17,17 @@ log = logging.getLogger("main")
 
 async def main() -> None:
     db.init()
+    tunnel_proc = None
+    runner = None
     app = build_application()
     async with app:
+        runner = await start_web(app.bot)
+        if not config.WEBAPP_URL:
+            tunnel_proc, t_url = await tunnel.start_tunnel(config.WEB_PORT)
+            if t_url:
+                config.WEBAPP_URL = t_url
+                log.info("Dashboard URL: %s", config.WEBAPP_URL)
+
         # Retry bot setup up to 3 times in case of startup network hiccups
         for attempt in range(1, 4):
             try:
@@ -29,7 +39,6 @@ async def main() -> None:
                 log.warning("Connecting to Telegram timed out or failed (attempt %d/3: %s). Retrying in 5 seconds...", attempt, e)
                 await asyncio.sleep(5)
 
-        runner = await start_web(app.bot)
         await app.start()
         await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         me = await app.bot.get_me()
@@ -39,7 +48,10 @@ async def main() -> None:
         finally:
             await app.updater.stop()
             await app.stop()
-            await runner.cleanup()
+            if runner:
+                await runner.cleanup()
+            if tunnel_proc:
+                await tunnel.close_tunnel(tunnel_proc)
             import receipt_browser
             if receipt_browser.AVAILABLE:
                 await receipt_browser.close()
