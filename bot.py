@@ -31,6 +31,8 @@ WAITER_HELP = (
     "⌨️ <b>Or type</b> the transaction code and amount:\n"
     "   <code>FT263113HT19 450</code>\n"
     "   (Forwarding the bank SMS confirmation also works).\n\n"
+    "⚠️ <b>Important:</b> Payments MUST be sent to your store's registered accounts (CBE / telebirr). "
+    "Payments sent to other accounts are automatically <b>REJECTED</b> as invalid.\n\n"
     "🔄 <b>Working for multiple stores?</b>\n"
     "   Use <code>/switch</code> anytime to change which business you are submitting for.\n\n"
     "👤 <b>Set your counter name:</b>\n"
@@ -41,18 +43,24 @@ WAITER_HELP = (
 
 OWNER_HELP = (
     "👑 <b>Business Owner Commands</b>\n\n"
+    "📊 <b>Reports & Dashboard:</b>\n"
     "/report – open live WebApp dashboard\n"
     "/summary [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – sales totals by cashier, bank & customer\n"
-    "/pdf [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – generate downloadable PDF report\n"
-    "/export [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – download CSV spreadsheet for Excel\n"
-    "/mybusiness – view business settings, receiving accounts & join code\n"
-    "/code &lt;new_code&gt; – change the cashier join code\n"
-    "/setaccounts &lt;acc1,acc2&gt; – set bank accounts for anti-fake verification\n"
-    "/setnames &lt;name1,name2&gt; – set receiver account holder names\n"
-    "/cashiers – list all cashiers and counters\n"
-    "/remove &lt;id&gt; – deactivate a cashier\n"
-    "/switch – switch active business (if you own multiple)\n\n"
-    "Cashiers join by sending <code>/join &lt;code&gt; [Counter Name]</code> to this bot."
+    "/pdf [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – download publication-grade PDF report\n"
+    "/export [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – download CSV spreadsheet for Excel\n\n"
+    "🏦 <b>Payment Accounts (Anti-Fake Fraud Rules):</b>\n"
+    "<i>All customer payments must go to your registered accounts. Other transactions are rejected as invalid.</i>\n"
+    "/setcbe &lt;13-digit-cbe-account&gt; – set your CBE account (e.g. <code>/setcbe 1000123456076</code>)\n"
+    "/settelebirr &lt;phone-or-merchant&gt; – set telebirr (e.g. <code>/settelebirr 0911223344</code>)\n"
+    "/setaccounts &lt;cbe,telebirr&gt; – set multiple accounts\n"
+    "/setnames &lt;Store Legal Names&gt; – set account holder name(s)\n"
+    "/mybusiness – view your business profile, accounts & stats\n\n"
+    "👥 <b>Cashier Management (Owner-Controlled):</b>\n"
+    "/addwaiter &lt;tg_id&gt; [Counter Name] – register a cashier directly\n"
+    "/cashiers – list all cashiers & counters\n"
+    "/remove &lt;cashier_id&gt; – deactivate a cashier\n"
+    "/code &lt;new_code&gt; – change the cashier join request code\n"
+    "/switch – switch active business (if you own multiple)"
 )
 
 SUPERADMIN_HELP = (
@@ -101,7 +109,8 @@ def get_active_business(uid: int) -> dict | None:
 def can_submit(uid: int) -> bool:
     if is_superadmin(uid) or is_any_owner(uid):
         return True
-    return len(db.get_waiter_businesses(uid)) > 0
+    active_jobs = db.get_waiter_businesses(uid)
+    return len(active_jobs) > 0
 
 
 def dashboard_markup() -> InlineKeyboardMarkup | None:
@@ -116,7 +125,6 @@ async def notify_business_owners(bot, business_id: int, text: str, markup=None, 
     """Delivers alerts specifically to the owners of the business."""
     owners = db.get_business_owners(business_id)
     owner_ids = {o["tg_id"] for o in owners}
-    # Also include superadmins configured in OWNER_IDS
     owner_ids.update(config.OWNER_IDS)
 
     photo_file = (config.PHOTOS_DIR / photo_path) if photo_path else None
@@ -217,6 +225,8 @@ def entry_text(p: dict, extra: list[str], checking: bool, title: str = "Saved") 
         lines.append("🏦 <i>Checking with the bank…</i>")
     if p["status"] == "verified":
         lines.append("✅ <b>Verified Real</b>")
+    elif p["status"] == "rejected":
+        lines.append("❌ <b>REJECTED / INVALID</b>")
     if (p["tx_ref"] is None or p["amount"] is None) and not checking and p.get("bank_check") != "ok":
         lines.append("\n↩️ <i>Reply to this message with the missing amount and/or code.</i>")
     return "\n".join(lines)
@@ -258,6 +268,8 @@ def owner_payment_text(p: dict) -> str:
         verif = f"🔴 <b>FRAUD ALERT / MISMATCH!</b>\n   ↳ <i>{H(p.get('bank_check_msg', ''))}</i>"
     elif p["status"] == "verified":
         verif = "✅ <b>Verified</b>"
+    elif p["status"] == "rejected":
+        verif = "❌ <b>REJECTED / INVALID</b> (Money went to another account!)"
     elif p.get("duplicate_of"):
         dup = db.get_payment(p["duplicate_of"])
         dup_by = dup["waiter_name"] if dup else "earlier"
@@ -357,10 +369,13 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.reply_html(f"👋 Welcome back! Active store: <b>{H(name)}</b>\n\n" + WAITER_HELP)
     else:
         await msg.reply_html(
-            "👋 <b>Welcome to the Transaction Checker!</b>\n\n"
-            "• If you are a <b>Cashier / Waiter</b>: Ask your store manager for the join code, then send:\n"
-            "  <code>/join &lt;code&gt; [Counter Name]</code>\n\n"
-            "• If you are a <b>Business Owner</b>: Contact the bot administrator to register your business."
+            f"👋 <b>Welcome to the Transaction Checker!</b>\n\n"
+            f"Your Telegram User ID is: <code>{u.id}</code>\n\n"
+            f"🔒 <b>Only the business owner can register cashiers.</b>\n"
+            f"Give your Telegram ID (<code>{u.id}</code>) to your store owner so they can register you with:\n"
+            f"<code>/addwaiter {u.id} [Counter Name]</code>\n\n"
+            f"Or if your store owner provided a join code, send:\n"
+            f"<code>/join &lt;code&gt; [Counter Name]</code> (your registration will be sent to the owner for approval)."
         )
 
 
@@ -376,7 +391,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ------------------------------------------------------------------ waiter: registration & multi-business switching
 async def cmd_join(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Cashiers join a business via code. Supports working for multiple businesses simultaneously."""
+    """Cashier requests to join a business. Requires store owner approval."""
     u, msg = update.effective_user, update.effective_message
     if not ctx.args:
         await msg.reply_html("Usage: <code>/join &lt;CODE&gt; [Counter Name]</code>\nExample: <code>/join bolecafe Counter 1</code>")
@@ -385,28 +400,57 @@ async def cmd_join(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     code = ctx.args[0].strip().lower()
     biz = db.get_business_by_code(code)
     if not biz or not biz["active"]:
-        await msg.reply_text("❌ Business code not found. Please ask your store owner/manager for the correct code.")
+        await msg.reply_text("❌ Business code not found. Please ask your store owner for the correct code.")
         return
 
     custom_name = " ".join(ctx.args[1:]).strip() if len(ctx.args) > 1 else ""
     cashier_name = f"{custom_name} ({u.full_name})" if custom_name else u.full_name
 
-    db.upsert_user(u.id, cashier_name, u.username, "waiter")
-    db.add_waiter_to_business(biz["id"], u.id, cashier_name)
+    # Check if already active
+    if db.is_waiter_active_in_business(biz["id"], u.id):
+        await msg.reply_html(f"ℹ️ You are already registered as an active cashier for <b>{H(biz['name'])}</b>.")
+        return
 
-    all_jobs = db.get_waiter_businesses(u.id)
-    multi_note = ""
-    if len(all_jobs) > 1:
-        multi_note = f"\n\n🔄 You now work for <b>{len(all_jobs)} businesses</b>! Use <code>/switch</code> anytime to change which business you are submitting for."
+    # Save as pending (active=0)
+    db.upsert_user(u.id, cashier_name, u.username, "waiter")
+    db.add_waiter_to_business(biz["id"], u.id, cashier_name, active=0)
 
     await msg.reply_html(
-        f"✅ Registered as <b>{H(cashier_name)}</b> at <b>{H(biz['name'])}</b>!\n"
-        f"Your active business is now set to <b>{H(biz['name'])}</b>.{multi_note}\n\n" + WAITER_HELP
+        f"⏳ <b>Registration request sent to the owner of {H(biz['name'])}!</b>\n\n"
+        f"• Store: <b>{H(biz['name'])}</b>\n"
+        f"• Cashier: <b>{H(cashier_name)}</b>\n"
+        f"• Your Telegram ID: <code>{u.id}</code>\n\n"
+        f"🔒 The business owner must approve your registration before you can submit receipts. "
+        f"You will receive a notification as soon as you are approved."
     )
-    await notify_business_owners(
-        ctx.bot, biz["id"],
-        f"👤 <b>New cashier joined {H(biz['name'])}:</b> {H(cashier_name)} (ID: <code>{u.id}</code>)"
+
+    # Send approval card with inline buttons to all store owners
+    owners = db.get_business_owners(biz["id"])
+    owner_ids = {o["tg_id"] for o in owners}
+    owner_ids.update(config.OWNER_IDS)
+
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Approve Cashier", callback_data=f"waiter_appr:{biz['id']}:{u.id}"),
+            InlineKeyboardButton("❌ Decline", callback_data=f"waiter_decl:{biz['id']}:{u.id}")
+        ]
+    ])
+
+    alert_text = (
+        f"👤 <b>New Cashier Registration Request</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"• Store: <b>{H(biz['name'])}</b>\n"
+        f"• Cashier: <b>{H(cashier_name)}</b> (@{H(u.username or 'none')})\n"
+        f"• Telegram ID: <code>{u.id}</code>\n"
+        f"• Counter: <b>{H(custom_name or 'Not specified')}</b>\n\n"
+        f"Do you want to register this cashier for your store?"
     )
+
+    for oid in owner_ids:
+        try:
+            await ctx.bot.send_message(oid, alert_text, parse_mode="HTML", reply_markup=markup)
+        except TelegramError as e:
+            log.warning("Could not message owner %s for waiter approval: %s", oid, e)
 
 
 async def cmd_switch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -422,7 +466,7 @@ async def cmd_switch(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if is_superadmin(u.id):
             biz_map = {b["id"]: b for b in db.list_businesses()}
         else:
-            await msg.reply_html("You haven't joined any businesses yet. Send <code>/join CODE</code> to join one.")
+            await msg.reply_html("You haven't joined any businesses yet. Give your ID to your store owner so they can register you.")
             return
 
     active = get_active_business(u.id)
@@ -459,12 +503,52 @@ async def on_switch_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
             f"Receipts you submit will now be credited to <b>{H(biz['name'])}</b>.",
             parse_mode="HTML"
         )
+    elif data.startswith("waiter_appr:"):
+        parts = data.split(":")
+        biz_id, waiter_id = int(parts[1]), int(parts[2])
+        if not (is_superadmin(query.from_user.id) or db.is_business_owner(biz_id, query.from_user.id)):
+            await query.answer("Only the store owner can approve cashiers.", show_alert=True)
+            return
+        biz = db.get_business(biz_id)
+        w_user = db.get_user(waiter_id)
+        w_name = w_user["name"] if w_user else f"Cashier {waiter_id}"
+        db.add_waiter_to_business(biz_id, waiter_id, active=1)
+        await query.edit_message_text(
+            f"✅ <b>Approved by {H(query.from_user.full_name)}!</b>\n"
+            f"Cashier <b>{H(w_name)}</b> (ID: <code>{waiter_id}</code>) is now registered for <b>{H(biz['name'])}</b>.",
+            parse_mode="HTML"
+        )
+        try:
+            await ctx.bot.send_message(
+                waiter_id,
+                f"🎉 <b>Your registration for {H(biz['name'])} was APPROVED by the owner!</b>\n\n"
+                f"You can now submit customer receipts for {H(biz['name'])}.\n\n" + WAITER_HELP,
+                parse_mode="HTML"
+            )
+        except TelegramError:
+            pass
+    elif data.startswith("waiter_decl:"):
+        parts = data.split(":")
+        biz_id, waiter_id = int(parts[1]), int(parts[2])
+        if not (is_superadmin(query.from_user.id) or db.is_business_owner(biz_id, query.from_user.id)):
+            await query.answer("Only the store owner can decline cashiers.", show_alert=True)
+            return
+        db.remove_waiter_from_business(biz_id, waiter_id)
+        await query.edit_message_text("❌ <b>Registration declined.</b>", parse_mode="HTML")
+        try:
+            await ctx.bot.send_message(
+                waiter_id,
+                "❌ <b>Your registration request was declined by the store owner.</b>",
+                parse_mode="HTML"
+            )
+        except TelegramError:
+            pass
 
 
 async def cmd_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     u, msg = update.effective_user, update.effective_message
     if not can_submit(u.id):
-        await msg.reply_html("You're not registered. Send <code>/join CODE</code> first.")
+        await msg.reply_html("You're not registered. Ask your store owner to register you with <code>/addwaiter</code>.")
         return
     if not ctx.args:
         await msg.reply_html("Usage: <code>/name Counter 1</code> or <code>/name Counter 2 - Meron</code>")
@@ -472,7 +556,7 @@ async def cmd_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     new_name = " ".join(ctx.args).strip()
     biz = get_active_business(u.id)
     if biz:
-        db.add_waiter_to_business(biz["id"], u.id, new_name)
+        db.add_waiter_to_business(biz["id"], u.id, new_name, active=1)
     user = db.get_user(u.id)
     role = user["role"] if user else "waiter"
     db.upsert_user(u.id, new_name, u.username, role)
@@ -486,17 +570,30 @@ async def cmd_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     u, msg = update.effective_user, update.effective_message
     if not can_submit(u.id):
-        await msg.reply_html("You're not registered. Send <code>/join CODE</code> first.")
+        await msg.reply_html(
+            f"🔒 <b>You are not an authorized cashier.</b>\n\n"
+            f"Your Telegram ID is: <code>{u.id}</code>\n"
+            f"Ask your store owner to register you using:\n<code>/addwaiter {u.id} [Counter Name]</code>"
+        )
         return
 
     biz = get_active_business(u.id)
     if not biz:
-        await msg.reply_text("⚠️ No active business selected. Use /switch or /join.")
+        await msg.reply_text("⚠️ No active business selected. Use /switch or ask your store owner to register you.")
         return
 
     biz_id = biz["id"]
     accounts = [a.strip() for a in (biz["accounts"] or "").split(",") if a.strip()]
     names = [n.strip() for n in (biz["names"] or "").split(",") if n.strip()]
+
+    # If owner hasn't set accounts yet, warn owner
+    if not accounts and not names:
+        await notify_business_owners(
+            ctx.bot, biz_id,
+            f"⚠️ <b>WARNING for {H(biz['name'])}:</b> Cashier {H(u.full_name)} submitted a payment, "
+            f"but you have NOT set your CBE or telebirr payment accounts yet!\n"
+            f"Use <code>/setaccounts &lt;CBE&gt;, &lt;telebirr&gt;</code> immediately so payments can be verified!"
+        )
 
     tg_file = await (msg.photo[-1].get_file() if msg.photo else msg.document.get_file())
     day = config.business_day()
@@ -509,20 +606,54 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     info = await asyncio.to_thread(parsing.analyze_image, str(path), caption)
     r: banks.Receipt = info["receipt"]
 
+    # STRICT RULE: Transactions must go to the owner's accounts!
+    receiver_valid = banks.receiver_ok(r, accounts=accounts, names=names)
+    is_fraudulent_receiver = (receiver_valid is False)
+
     flags = banks.offline_flags(r, accounts=accounts, names=names)
     flags += info.get("tamper_flags", [])
+
+    if is_fraudulent_receiver:
+        flags.append(f"🔴 FRAUD: Money was paid to {banks.receiver_label(r)}, NOT {biz['name']}'s registered account!")
+
+    status = "rejected" if is_fraudulent_receiver else "pending"
 
     pid = db.add_payment(
         business_id=biz_id,
         waiter_id=u.id, day=day, kind="photo",
+        status=status,
+        reviewed_at=config.now_utc().isoformat() if status == "rejected" else None,
         photo_path=str(path.relative_to(config.PHOTOS_DIR)),
         qr_data="\n".join(info["qr_data"]) or None,
         ocr_text=info["ocr_text"] or None,
         raw_text=caption or None,
         tx_ref=r.ref, amount=r.amount,
-        note=" ".join(info["notes"]) or None,
+        note=f"REJECTED: Paid to {banks.receiver_label(r)}" if is_fraudulent_receiver else (" ".join(info["notes"]) or None),
     )
     verify.save_receipt_fields(pid, r, flags)
+
+    if is_fraudulent_receiver:
+        # Transaction is INVALID!
+        await msg.reply_html(
+            f"❌ <b>REJECTED / INVALID TRANSACTION #{pid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Paid To: <b>{H(banks.receiver_label(r))}</b>\n"
+            f"Amount: <b>{config.money(r.amount, biz.get('currency'))}</b>\n\n"
+            f"⚠️ <b>This payment went to a DIFFERENT account, NOT {H(biz['name'])}'s account!</b>\n"
+            f"Only payments to the store owner's registered CBE/telebirr account are valid.\n"
+            f"This transaction is <b>REJECTED</b> and is <b>NOT counted</b> in sales."
+        )
+        await notify_business_owners(
+            ctx.bot, biz_id,
+            f"🚨 <b>FRAUD ALERT: INVALID PAYMENT #{pid}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 Cashier: <b>{H(u.full_name)}</b>\n"
+            f"💰 Amount: <b>{config.money(r.amount, biz.get('currency'))}</b>\n"
+            f"📥 Receiver: <b>{H(banks.receiver_label(r))}</b>\n"
+            f"❌ <b>Status: REJECTED (Did NOT go to your store account!)</b>",
+            photo_path=str(path.relative_to(config.PHOTOS_DIR))
+        )
+        return
 
     extra = ["📷 QR code read ✓" if info["qr_data"] else "📷 No QR code found in the photo"]
     extra += [f"ℹ️ {H(n)}" for n in info["notes"]]
@@ -572,7 +703,11 @@ async def _update_entry(update: Update, ctx: ContextTypes.DEFAULT_TYPE, target: 
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     u, msg = update.effective_user, update.effective_message
     if not can_submit(u.id):
-        await msg.reply_html("You're not registered. Send <code>/join CODE</code> first.")
+        await msg.reply_html(
+            f"🔒 <b>You are not an authorized cashier.</b>\n\n"
+            f"Your Telegram ID is: <code>{u.id}</code>\n"
+            f"Ask your store owner to register you using:\n<code>/addwaiter {u.id} [Counter Name]</code>"
+        )
         return
 
     biz = get_active_business(u.id)
@@ -618,12 +753,40 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             continue
         if not r.bank:
             r.bank = banks.guess_bank_from_ref(r.ref)
+
+        receiver_valid = banks.receiver_ok(r, accounts=accounts, names=names)
+        is_fraud = (receiver_valid is False)
+
         flags = banks.offline_flags(r, accounts=accounts, names=names)
-        pid = db.add_payment(business_id=biz_id, waiter_id=u.id, kind="text", raw_text=raw, tx_ref=r.ref, amount=r.amount)
+        if is_fraud:
+            flags.append(f"🔴 FRAUD: Money paid to {banks.receiver_label(r)}, NOT store account!")
+
+        status = "rejected" if is_fraud else "pending"
+
+        pid = db.add_payment(
+            business_id=biz_id, waiter_id=u.id, kind="text", raw_text=raw,
+            tx_ref=r.ref, amount=r.amount, status=status,
+            reviewed_at=config.now_utc().isoformat() if status == "rejected" else None
+        )
         verify.save_receipt_fields(pid, r, flags)
+
+        if is_fraud:
+            footer.append(f"❌ #{pid} <b>REJECTED</b>: Paid to {H(banks.receiver_label(r))} (not store account)!")
+            await notify_business_owners(
+                ctx.bot, biz_id,
+                f"🚨 <b>FRAUD ALERT: INVALID PAYMENT #{pid}</b>\n"
+                f"👤 Cashier: {H(u.full_name)} · 💰 Amount: {config.money(r.amount, biz.get('currency'))}\n"
+                f"📥 Receiver: {H(banks.receiver_label(r))} (NOT your account!)"
+            )
+            continue
+
         extras[pid] = [await check_duplicate(ctx.bot, pid, r.ref, u.full_name, biz_id)]
         await alert_flags(ctx.bot, pid, flags, u.full_name, biz_id)
         pids.append(pid)
+
+    if not pids and footer:
+        await msg.reply_html("\n".join(footer))
+        return
 
     checking = config.BANK_CHECK
     sent = await msg.reply_html(batch_text(pids, extras, checking, footer))
@@ -779,6 +942,73 @@ async def cmd_export(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @owner_only
+async def cmd_addwaiter(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """The business owner registers a waiter directly."""
+    u, msg = update.effective_user, update.effective_message
+    biz = get_active_business(u.id)
+    if not biz:
+        await msg.reply_text("No active business configured.")
+        return
+
+    target_id = None
+    counter_name = ""
+
+    # Check if replied to a message from the waiter
+    if msg.reply_to_message and msg.reply_to_message.from_user:
+        target_user = msg.reply_to_message.from_user
+        target_id = target_user.id
+        counter_name = " ".join(ctx.args).strip() if ctx.args else target_user.full_name
+    elif ctx.args:
+        first_arg = ctx.args[0].strip()
+        if first_arg.isdigit():
+            target_id = int(first_arg)
+            counter_name = " ".join(ctx.args[1:]).strip() if len(ctx.args) > 1 else ""
+        elif first_arg.startswith("@"):
+            found_u = db.get_user_by_username(first_arg)
+            if found_u:
+                target_id = found_u["tg_id"]
+                counter_name = " ".join(ctx.args[1:]).strip() if len(ctx.args) > 1 else found_u["name"]
+            else:
+                await msg.reply_html(f"❌ User <code>{H(first_arg)}</code> hasn't messaged the bot yet. Ask them to press /start to get their Telegram ID.")
+                return
+
+    if not target_id:
+        await msg.reply_html(
+            "<b>How to register a cashier for your store:</b>\n\n"
+            "Usage: <code>/addwaiter &lt;telegram_id&gt; [Counter Name]</code>\n"
+            "Example: <code>/addwaiter 987654321 Counter 1 - Meron</code>\n\n"
+            "💡 <i>Tip: The cashier can find their Telegram ID by sending /start to this bot. You can also forward any message from them and reply with <code>/addwaiter Counter 1</code>!</i>"
+        )
+        return
+
+    target_user = db.get_user(target_id)
+    name_display = counter_name or (target_user["name"] if target_user else f"Cashier {target_id}")
+
+    db.upsert_user(target_id, name_display, target_user["username"] if target_user else None, "waiter")
+    db.add_waiter_to_business(biz["id"], target_id, name_display, active=1)
+
+    await msg.reply_html(
+        f"✅ <b>Cashier Registered!</b>\n\n"
+        f"• Store: <b>{H(biz['name'])}</b>\n"
+        f"• Cashier: <b>{H(name_display)}</b>\n"
+        f"• Telegram ID: <code>{target_id}</code>\n\n"
+        f"They can now submit customer payment receipts for your store."
+    )
+
+    # Notify cashier
+    try:
+        await ctx.bot.send_message(
+            target_id,
+            f"🎉 <b>You have been registered as a cashier for {H(biz['name'])}!</b>\n\n"
+            f"Counter / Name: <b>{H(name_display)}</b>\n\n"
+            f"You can now take photos of customer receipts and send them here.\n\n" + WAITER_HELP,
+            parse_mode="HTML"
+        )
+    except TelegramError:
+        pass
+
+
+@owner_only
 async def cmd_mybusiness(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     u = update.effective_user
     biz = get_active_business(u.id)
@@ -788,29 +1018,99 @@ async def cmd_mybusiness(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
 
     waiters = db.get_waiters_for_business(biz["id"])
     active_waiters = [w for w in waiters if w["active"]]
+    pending_waiters = [w for w in waiters if not w["active"]]
     owners = db.get_business_owners(biz["id"])
     owner_names = ", ".join(H(o["name"]) for o in owners) or "None"
 
-    accounts_str = H(biz["accounts"] or "None configured")
-    names_str = H(biz["names"] or "None configured")
+    accounts_str = H(biz["accounts"] or "⚠️ None set! Run /setcbe & /settelebirr")
+    names_str = H(biz["names"] or "⚠️ None set! Run /setnames")
 
     text = (
         f"🏢 <b>Business Profile: {H(biz['name'])}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 ID: <code>{biz['id']}</code>\n"
+        f"🆔 Business ID: <code>{biz['id']}</code>\n"
         f"🔑 Join Code: <code>{H(biz['code'])}</code>\n"
         f"💱 Currency: <b>{H(biz['currency'])}</b>\n"
         f"👥 Owners: {owner_names}\n"
-        f"🛒 Active Cashiers: <b>{len(active_waiters)}</b>\n\n"
-        f"🏦 <b>Registered Receiving Accounts:</b>\n<code>{accounts_str}</code>\n"
-        f"👤 <b>Account Holder Names:</b>\n<code>{names_str}</code>\n\n"
-        "<b>Commands to manage your business:</b>\n"
-        "• <code>/code &lt;new_code&gt;</code> – change join code\n"
-        "• <code>/setaccounts 1000123..., 0911...</code> – set receiving bank accounts\n"
-        "• <code>/setnames Company Name PLC, Abebe...</code> – set receiver names\n"
-        "• <code>/cashiers</code> – view all cashiers"
+        f"🛒 Active Cashiers: <b>{len(active_waiters)}</b>"
+        + (f" (⏳ {len(pending_waiters)} pending)" if pending_waiters else "") + "\n\n"
+        f"🏦 <b>Registered Payment Accounts:</b>\n<code>{accounts_str}</code>\n\n"
+        f"👤 <b>Account Holder Legal Names:</b>\n<code>{names_str}</code>\n\n"
+        "🔒 <b>FRAUD PROTECTION ACTIVE:</b>\n"
+        "All transactions MUST be paid to the accounts above. Any payment to another account is automatically rejected!\n\n"
+        "<b>Management Commands:</b>\n"
+        "• <code>/addwaiter &lt;id&gt; [Counter]</code> – register a cashier\n"
+        "• <code>/setcbe 1000...</code> – set your CBE account\n"
+        "• <code>/settelebirr 0911...</code> – set your telebirr account\n"
+        "• <code>/setnames Store Name PLC</code> – set legal account name\n"
+        "• <code>/cashiers</code> – view registered cashiers\n"
+        "• <code>/code &lt;new_code&gt;</code> – change join code"
     )
     await update.effective_message.reply_html(text)
+
+
+@owner_only
+async def cmd_setcbe(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    u = update.effective_user
+    biz = get_active_business(u.id)
+    if not biz:
+        await update.effective_message.reply_text("No business configured.")
+        return
+    if not ctx.args:
+        await update.effective_message.reply_html(
+            "<b>Set your Commercial Bank of Ethiopia (CBE) Account:</b>\n\n"
+            "Usage: <code>/setcbe 1000123456076</code>\n"
+            "(Must be your 13-digit CBE account number)."
+        )
+        return
+    acc = re.sub(r"\D", "", ctx.args[0])
+    if len(acc) != 13 or not acc.startswith("1"):
+        await update.effective_message.reply_text("⚠️ CBE account numbers are 13 digits starting with 1 (e.g. 1000123456076).")
+        return
+
+    current = [a.strip() for a in (biz["accounts"] or "").split(",") if a.strip()]
+    # Replace old CBE or add
+    kept = [a for a in current if not (len(re.sub(r"\D", "", a)) == 13 and re.sub(r"\D", "", a).startswith("1"))]
+    kept.insert(0, acc)
+    new_accounts_str = ",".join(kept)
+    db.update_business(biz["id"], accounts=new_accounts_str)
+
+    await update.effective_message.reply_html(
+        f"✅ <b>CBE Account Set!</b>\n\n"
+        f"• Store: <b>{H(biz['name'])}</b>\n"
+        f"• CBE Account: <code>{acc}</code>\n\n"
+        f"Automatic CBE bank confirmation is now active! Any receipt claiming to be CBE that was paid to another account will be rejected as fraud."
+    )
+
+
+@owner_only
+async def cmd_settelebirr(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    u = update.effective_user
+    biz = get_active_business(u.id)
+    if not biz:
+        await update.effective_message.reply_text("No business configured.")
+        return
+    if not ctx.args:
+        await update.effective_message.reply_html(
+            "<b>Set your telebirr Account or Merchant Till:</b>\n\n"
+            "Usage: <code>/settelebirr 0911223344</code> or <code>/settelebirr 582910</code>\n"
+            "(Enter your phone number or merchant till code)."
+        )
+        return
+    acc = re.sub(r"\D", "", ctx.args[0])
+    current = [a.strip() for a in (biz["accounts"] or "").split(",") if a.strip()]
+    # Keep CBE accounts
+    kept = [a for a in current if len(re.sub(r"\D", "", a)) == 13 and re.sub(r"\D", "", a).startswith("1")]
+    kept.append(acc)
+    new_accounts_str = ",".join(kept)
+    db.update_business(biz["id"], accounts=new_accounts_str)
+
+    await update.effective_message.reply_html(
+        f"✅ <b>telebirr Account Set!</b>\n\n"
+        f"• Store: <b>{H(biz['name'])}</b>\n"
+        f"• telebirr: <code>{acc}</code>\n\n"
+        f"telebirr payments to other numbers will now be automatically rejected as fraud!"
+    )
 
 
 @owner_only
@@ -831,7 +1131,7 @@ async def cmd_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     db.update_business(biz["id"], code=new_code)
     await update.effective_message.reply_html(f"✅ Cashier join code updated to: <code>{H(new_code)}</code>\n"
-                                             f"Cashiers can join with: <code>/join {H(new_code)} [Counter]</code>")
+                                             f"Cashiers can request to join with: <code>/join {H(new_code)} [Counter]</code>")
 
 
 @owner_only
@@ -845,14 +1145,14 @@ async def cmd_setaccounts(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         await update.effective_message.reply_html(
             f"Current accounts: <code>{H(biz['accounts'] or 'None')}</code>\n\n"
             "Usage: <code>/setaccounts 1000123456076, 0911223344</code>\n"
-            "(Enter your 13-digit CBE account and/or telebirr merchant number, separated by commas)."
+            "(Enter your 13-digit CBE account and telebirr merchant/phone number separated by commas)."
         )
         return
     new_accs = " ".join(ctx.args).replace(" ", "")
     db.update_business(biz["id"], accounts=new_accs)
     await update.effective_message.reply_html(
         f"✅ Bank accounts updated for <b>{H(biz['name'])}</b>:\n<code>{H(new_accs)}</code>\n\n"
-        "Automatic CBE verification and receiver matching are now active for these accounts!"
+        "🔒 <b>Anti-Fake Rule:</b> Only payments sent to these accounts are valid! All others will be rejected automatically."
     )
 
 
@@ -874,7 +1174,7 @@ async def cmd_setnames(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     db.update_business(biz["id"], names=new_names)
     await update.effective_message.reply_html(
         f"✅ Account holder names updated for <b>{H(biz['name'])}</b>:\n<code>{H(new_names)}</code>\n\n"
-        "Receipts with different recipient names will be flagged automatically as fraud attempts!"
+        "Receipts with different recipient names will be rejected automatically as fraud attempts!"
     )
 
 
@@ -889,15 +1189,16 @@ async def cmd_waiters(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     waiters = db.get_waiters_for_business(biz["id"])
     if not waiters:
         await update.effective_message.reply_html(
-            f"No cashiers registered yet for <b>{H(biz['name'])}</b>.\n"
-            f"Cashiers join by sending <code>/join {H(biz['code'])} [Counter Name]</code>")
+            f"No cashiers registered yet for <b>{H(biz['name'])}</b>.\n\n"
+            f"Register a cashier now: <code>/addwaiter &lt;telegram_id&gt; [Counter Name]</code>")
         return
-    lines = [f"👥 <b>Registered Cashiers & Counters ({H(biz['name'])})</b>"]
+    lines = [f"👥 <b>Registered Cashiers & Counters ({H(biz['name'])})</b>\n━━━━━━━━━━━━━━━━━━━━"]
     for w in waiters:
-        status_icon = "🟢 Active" if w["active"] else "⚪️ Inactive"
+        status_icon = "🟢 Active" if w["active"] else "⏳ Pending Approval"
         c_name = w["counter_name"] or w["user_name"]
         lines.append(f"• {status_icon}: <b>{H(c_name)}</b> (ID: <code>{w['tg_id']}</code>)")
-    lines.append("\nDeactivate a cashier: <code>/remove &lt;id&gt;</code>")
+    lines.append("\n• Register cashier: <code>/addwaiter &lt;id&gt; [Counter]</code>")
+    lines.append("• Deactivate cashier: <code>/remove &lt;id&gt;</code>")
     await update.effective_message.reply_html("\n".join(lines))
 
 
@@ -929,7 +1230,6 @@ async def cmd_newbusiness(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     raw = " ".join(ctx.args)
-    # Check for quoted name
     match = re.match(r'^["\']([^"\']+)["\']\s*(.*)$', raw)
     if match:
         name = match.group(1).strip()
@@ -949,14 +1249,13 @@ async def cmd_newbusiness(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     if owner_id:
         db.add_business_owner(bid, owner_id)
         owner_str = f"<code>{owner_id}</code>"
-        # Send notification to the new owner if possible
         try:
             await ctx.bot.send_message(
                 owner_id,
                 f"🎉 <b>You have been registered as owner of {H(name)}!</b>\n\n"
                 f"• Business ID: <code>{bid}</code>\n"
                 f"• Cashier Join Code: <code>{biz['code']}</code>\n\n"
-                "Use /mybusiness to view your settings and /setaccounts to configure your bank accounts.",
+                "Use /setcbe and /settelebirr to set your payment accounts, and /addwaiter to register cashiers.",
                 parse_mode="HTML"
             )
         except TelegramError:
@@ -969,8 +1268,7 @@ async def cmd_newbusiness(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         f"• ID: <code>{bid}</code>\n"
         f"• Join Code: <code>{H(biz['code'])}</code>\n"
         f"• Assigned Owner: {owner_str}\n\n"
-        f"Cashiers can join with: <code>/join {H(biz['code'])} [Counter Name]</code>\n"
-        f"Owner can manage using /mybusiness, /setaccounts, /setnames."
+        f"Owner can set accounts with /setcbe, /settelebirr, and register cashiers with /addwaiter."
     )
     await update.effective_message.reply_html(text)
 
@@ -1048,8 +1346,11 @@ OWNER_COMMANDS = [
     BotCommand("summary", "Daily / monthly / yearly sales summary"),
     BotCommand("pdf", "Download PDF financial report"),
     BotCommand("export", "Download CSV spreadsheet"),
-    BotCommand("mybusiness", "Business profile, accounts & join code"),
+    BotCommand("mybusiness", "Business profile, accounts & stats"),
+    BotCommand("addwaiter", "Register a cashier"),
     BotCommand("cashiers", "List cashiers & counters"),
+    BotCommand("setcbe", "Set CBE account"),
+    BotCommand("settelebirr", "Set telebirr account"),
     BotCommand("switch", "Switch active business"),
     BotCommand("help", "Help & instructions"),
 ] + WAITER_COMMANDS[:4]
@@ -1107,9 +1408,12 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("pdf", cmd_pdf, private))
     app.add_handler(CommandHandler("export", cmd_export, private))
     app.add_handler(CommandHandler("mybusiness", cmd_mybusiness, private))
-    app.add_handler(CommandHandler("code", cmd_code, private))
+    app.add_handler(CommandHandler(["addwaiter", "addcashier"], cmd_addwaiter, private))
+    app.add_handler(CommandHandler("setcbe", cmd_setcbe, private))
+    app.add_handler(CommandHandler("settelebirr", cmd_settelebirr, private))
     app.add_handler(CommandHandler("setaccounts", cmd_setaccounts, private))
     app.add_handler(CommandHandler("setnames", cmd_setnames, private))
+    app.add_handler(CommandHandler("code", cmd_code, private))
     app.add_handler(CommandHandler(["cashiers", "waiters"], cmd_waiters, private))
     app.add_handler(CommandHandler("remove", cmd_remove, private))
 
@@ -1118,7 +1422,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("setowner", cmd_setowner, private))
     app.add_handler(CommandHandler("allbusinesses", cmd_allbusinesses, private))
 
-    # Callback Query handler (for /switch inline keyboard)
+    # Callback Query handler (for /switch and waiter approval buttons)
     app.add_handler(CallbackQueryHandler(on_switch_callback))
 
     # Message handlers

@@ -244,13 +244,26 @@ def get_user_owned_businesses(tg_id: int) -> list[dict]:
 
 
 # ---------------------------------------------------------------- waiters per business
-def add_waiter_to_business(business_id: int, tg_id: int, counter_name: str | None = None) -> None:
+def add_waiter_to_business(business_id: int, tg_id: int, counter_name: str | None = None, active: int = 1) -> None:
     _exec("""INSERT INTO business_waiters (business_id, tg_id, counter_name, active, joined_at)
-             VALUES (?,?,?,1,?)
-             ON CONFLICT(business_id, tg_id) DO UPDATE SET active=1,
+             VALUES (?,?,?,?,?)
+             ON CONFLICT(business_id, tg_id) DO UPDATE SET active=excluded.active,
              counter_name=COALESCE(excluded.counter_name, business_waiters.counter_name)""",
-          (business_id, tg_id, counter_name, config.now_utc().isoformat()))
-    set_user_active_business(tg_id, business_id)
+          (business_id, tg_id, counter_name, active, config.now_utc().isoformat()))
+    if active:
+        set_user_active_business(tg_id, business_id)
+
+
+def is_waiter_active_in_business(business_id: int, tg_id: int) -> bool:
+    row = _one("SELECT active FROM business_waiters WHERE business_id=? AND tg_id=?", (business_id, tg_id))
+    return bool(row and row["active"] == 1)
+
+
+def get_pending_waiters_for_business(business_id: int) -> list[dict]:
+    return _query("""SELECT bw.*, COALESCE(u.name, CAST(bw.tg_id AS TEXT)) AS user_name, u.username
+                     FROM business_waiters bw
+                     LEFT JOIN users u ON u.tg_id = bw.tg_id
+                     WHERE bw.business_id=? AND bw.active=0 ORDER BY bw.joined_at DESC""", (business_id,))
 
 
 def set_user_active_business(tg_id: int, business_id: int) -> None:
@@ -321,6 +334,11 @@ def upsert_user(tg_id: int, name: str, username: str | None, role: str) -> None:
 
 def get_user(tg_id: int) -> dict | None:
     return _one("SELECT * FROM users WHERE tg_id=?", (tg_id,))
+
+
+def get_user_by_username(username: str) -> dict | None:
+    uname = username.lstrip("@").strip().lower()
+    return _one("SELECT * FROM users WHERE lower(username)=?", (uname,))
 
 
 def set_user_active(tg_id: int, active: bool) -> bool:

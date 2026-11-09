@@ -279,7 +279,18 @@ def name_matches(name: str | None, names: list[str] | None = None) -> bool | Non
 
 def receiver_ok(r: Receipt, accounts: list[str] | None = None, names: list[str] | None = None) -> bool | None:
     acc = account_matches(r.receiver_account, accounts)
-    return acc if acc is not None else name_matches(r.receiver, names)
+    nm = name_matches(r.receiver, names)
+    if acc is False:
+        return False
+    if nm is False and acc is None:
+        return False
+    if acc is True:
+        if nm is False:
+            return False
+        return True
+    if nm is True:
+        return True
+    return None
 
 
 def receiver_label(r: Receipt) -> str:

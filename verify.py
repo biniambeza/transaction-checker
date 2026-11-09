@@ -59,8 +59,12 @@ async def check_payment(pid: int) -> banks.BankCheck | None:
                 if not same_biz:
                     existing_f = (p.get("flags") or "")
                     changes["flags"] = (existing_f + "; " if existing_f else "") + f"Reused receipt: already redeemed at another business (#{dup['id']})"
-    if (result.status == "ok" and config.AUTO_VERIFY and p["status"] == "pending"
-            and not p["duplicate_of"] and not p.get("flags")):
+    if result.status in ("mismatch", "not_found"):
+        changes["status"] = "rejected"
+        changes["reviewed_at"] = config.now_utc().isoformat()
+    elif (result.status == "ok" and config.AUTO_VERIFY and p["status"] == "pending"
+            and not p["duplicate_of"] and not p.get("flags")
+            and banks.receiver_ok(found or r, accounts=accounts, names=names) is not False):
         changes["status"] = "verified"
         changes["reviewed_at"] = config.now_utc().isoformat()
     db.update_payment(pid, **changes)
