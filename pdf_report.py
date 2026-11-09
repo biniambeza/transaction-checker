@@ -341,3 +341,4 @@ async def generate_pdf(business: dict, summary: dict, payments: list[dict], peri
         )
         await browser.close()
         return pdf_bytes
+
