@@ -1,0 +1,12 @@
+python-telegram-bot[job-queue]>=21.6,<23
+aiohttp>=3.13
+opencv-python-headless>=4.10
+numpy>=1.26
+python-dotenv>=1.0
+tzdata>=2024.1
+pypdf>=4.0
+# Hidden browser that opens bank receipt links (CBE's new QR codes load the receipt with JavaScript)
+playwright>=1.48
+# Reads text (transaction code / amount) from receipt screenshots.
+# Only works once the Tesseract program is installed:  winget install UB-Mannheim.TesseractOCR
+pytesseract>=0.3.10

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Payments Dashboard</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #8a8f98);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --btn: var(--tg-theme-button-color, #2481cc);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --ok: #2e9e5b; --bad: #d64545; --warn: #d9911a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg2); color: var(--text);
+         font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 12px 40px; }
+  .bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  select, input, button { font: inherit; color: var(--text); }
+  select, input { background: var(--bg); border: 1px solid color-mix(in srgb, var(--hint) 40%, transparent);
+                  border-radius: 10px; padding: 8px 10px; min-width: 0; }
+  select { flex: 1; }
+  button { border: 0; border-radius: 10px; padding: 8px 12px; background: var(--btn); color: var(--btn-text);
+           cursor: pointer; white-space: nowrap; }
+  button.ghost { background: var(--bg); color: var(--link); }
+  button.small { padding: 5px 10px; font-size: 13px; }
+  button.ok { background: var(--ok); color: #fff; } button.bad { background: var(--bad); color: #fff; }
+  .card { background: var(--bg); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--hint); margin: 0 0 8px; font-weight: 600; }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .stat { background: var(--bg2); border-radius: 10px; padding: 8px 10px; }
+  .stat .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--hint); }
+  .stat.big { grid-column: 1 / -1; } .stat.big .v { font-size: 26px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  .diff { margin-top: 8px; font-weight: 600; }
+  .diff.ok { color: var(--ok); } .diff.bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td, th { padding: 6px 4px; text-align: left; border-bottom: 1px solid var(--bg2); }
+  th { font-size: 12px; color: var(--hint); font-weight: 600; } td.n, th.n { text-align: right; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 8px; }
+  .chip { background: var(--bg2); color: var(--text); border-radius: 999px; padding: 5px 11px; font-size: 13px; }
+  .chip.on { background: var(--btn); color: var(--btn-text); }
+  .pay { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--bg2); }
+  .pay:last-child { border-bottom: 0; }
+  .thumb { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: var(--bg2); flex: none;
+           display: flex; align-items: center; justify-content: center; color: var(--hint); font-size: 22px; cursor: pointer; }
+  .info { flex: 1; min-width: 0; }
+  .l1 { display: flex; justify-content: space-between; gap: 8px; }
+  .ref { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; overflow-wrap: anywhere; }
+  .ref.missing, .amt.missing { color: var(--warn); }
+  .amt { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .meta { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
+  .badge { display: inline-block; font-size: 11px; border-radius: 6px; padding: 1px 6px; font-weight: 600; color: #fff; }
+  .b-pending { background: var(--hint); } .b-verified { background: var(--ok); } .b-rejected { background: var(--bad); }
+  .b-dup { background: var(--warn); }
+  .note { font-size: 12.5px; color: var(--warn); margin-top: 3px; }
+  .note.bad { color: var(--bad); font-weight: 600; } .note.good { color: var(--ok); }
+  details { font-size: 12px; color: var(--hint); margin-top: 4px; }
+  details pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; font-size: 11.5px; }
+  .actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .edit { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .edit input { flex: 1; min-width: 110px; padding: 6px 8px; }
+  .empty { text-align: center; color: var(--hint); padding: 24px 0; }
+  #viewer { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; align-items: center;
+            justify-content: center; z-index: 10; }
+  #viewer img { max-width: 100%; max-height: 100%; }
+  #msg { text-align: center; padding: 40px 16px; color: var(--hint); }
+</style>
+</head>
+<body>
+<main>
+  <div id="msg">Loading…</div>
+  <div id="app" hidden>
+    <div class="bar">
+      <select id="day"></select>
+      <button class="ghost" id="refresh" title="Refresh">↻</button>
+      <button class="ghost" id="export">CSV</button>
+    </div>
+
+    <section class="card">
+      <h2>Totals</h2>
+      <div class="stats" id="stats"></div>
+    </section>
+
+    <section class="card">
+      <h2>Check against bank</h2>
+      <div class="row">
+        <input id="bank" type="number" inputmode="decimal" step="0.01" placeholder="Total received in bank account">
+        <button id="saveBank">Save</button>
+      </div>
+      <div class="diff" id="diff"></div>
+    </section>
+
+    <section class="card">
+      <h2>By waiter</h2>
+      <table><thead><tr><th>Waiter</th><th class="n">#</th><th class="n">Total</th><th class="n">Verified</th></tr></thead>
+        <tbody id="waiters"></tbody></table>
+    </section>
+
+    <section class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <h2 style="margin:0">Entries</h2>
+        <button class="small ok" id="verifyAll">Verify all pending</button>
+      </div>
+      <input id="search" type="search" placeholder="Search code, waiter, amount…" style="width:100%;margin-bottom:8px">
+      <div class="chips" id="chips"></div>
+      <div id="list"></div>
+    </section>
+  </div>
+</main>
+<div id="viewer"><img alt="Receipt"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+const AUTH = tg ? tg.initData : "";
+if (tg) { tg.ready(); tg.expand(); }
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let CURRENCY = "";
+const money = (v) => v == null ? "—" :
+  Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + (CURRENCY ? " " + CURRENCY : "");
+const state = { day: null, data: null, filter: "all", q: "", editing: null };
+const CHECK_ICONS = { ok: "✅", mismatch: "🔴", not_found: "🔴", error: "⚠️", unsupported: "ℹ️" };
+
+const FILTERS = [
+  ["all", "All", () => true],
+  ["pending", "Pending", (p) => p.status === "pending" && !p.duplicate_of],
+  ["verified", "Verified", (p) => p.status === "verified"],
+  ["rejected", "Rejected", (p) => p.status === "rejected"],
+  ["problems", "🚩 Problems", (p) => p.problem],
+  ["dup", "⚠️ Duplicates", (p) => p.duplicate_of && p.status === "pending"],
+  ["missing", "❓ Missing info", (p) => p.status !== "rejected" && (p.amount == null || !p.tx_ref)],
+];
+
+async function api(path, method = "GET", body) {
+  const r = await fetch(path, {
+    method,
+    headers: Object.assign({"X-Telegram-Init-Data": AUTH}, body ? {"Content-Type": "application/json"} : {}),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error(await r.text() || ("HTTP " + r.status));
+  return r.json();
+}
+function alertMsg(text) { tg ? tg.showAlert(text) : alert(text); }
+function confirmMsg(text) {
+  return new Promise((res) => tg ? tg.showConfirm(text, res) : res(confirm(text)));
+}
+function haptic(kind) { try { tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} }
+
+async function init() {
+  if (!AUTH) { $("#msg").textContent = "Open this dashboard from the Telegram bot (/report)."; return; }
+  try {
+    const d = await api("api/days");
+    CURRENCY = d.currency || "";
+    const days = d.days.map((x) => x.day);
+    if (!days.includes(d.today)) days.unshift(d.today);
+    days.sort().reverse();
+    const counts = Object.fromEntries(d.days.map((x) => [x.day, x.count]));
+    $("#day").innerHTML = days.map((day) =>
+      `<option value="${day}">${day === d.today ? "Today · " : ""}${day} (${counts[day] || 0})</option>`).join("");
+    state.day = d.today;
+    $("#msg").hidden = true; $("#app").hidden = false;
+    await load();
+  } catch (e) { $("#msg").textContent = e.message; }
+}
+
+async function load() {
+  state.data = await api("api/day/" + state.day);
+  render();
+}
+
+function render() {
+  const { summary: s, payments } = state.data;
+  $("#stats").innerHTML = `
+    <div class="stat big"><div class="v">${money(s.claimed.total)}</div><div class="l">Claimed total · ${s.claimed.count} entries</div></div>
+    <div class="stat"><div class="v" style="color:var(--ok)">${money(s.verified.total)}</div><div class="l">✅ Verified · ${s.verified.count}</div></div>
+    <div class="stat"><div class="v">${money(s.pending.total)}</div><div class="l">⏳ Pending · ${s.pending.count}</div></div>
+    <div class="stat"><div class="v" style="color:var(--bad)">${money(s.rejected.total)}</div><div class="l">❌ Rejected · ${s.rejected.count}</div></div>
+    <div class="stat"><div class="v" style="color:var(--warn)">${s.duplicates.count}</div><div class="l">⚠️ Duplicates (not counted)</div></div>
+    <div class="stat"><div class="v">${money(s.bank_confirmed.total)}</div><div class="l">🏦 Confirmed by bank · ${s.bank_confirmed.count}</div></div>
+    <div class="stat"><div class="v" style="color:var(--bad)">${s.problems.count}</div><div class="l">🚩 Problems to check</div></div>
+    ${s.missing_amount || s.missing_ref ? `<div class="stat big"><div class="l" style="color:var(--warn)">❓ ${s.missing_amount} without amount · ${s.missing_ref} without code</div></div>` : ""}`;
+
+  if (document.activeElement !== $("#bank")) $("#bank").value = s.bank_total ?? "";
+  const diff = $("#diff");
+  if (s.difference == null) { diff.className = "diff"; diff.textContent = ""; }
+  else if (Math.abs(s.difference) < 0.01) { diff.className = "diff ok"; diff.textContent = "✅ Bank matches the claimed total"; }
+  else {
+    diff.className = "diff bad";
+    diff.textContent = (s.difference < 0 ? "🔴 Missing in bank: " : "🟡 Extra in bank: ") + money(Math.abs(s.difference));
+  }
+
+  $("#waiters").innerHTML = s.by_waiter.length ? s.by_waiter.map((w) =>
+    `<tr><td>${esc(w.name)}</td><td class="n">${w.count}</td><td class="n">${money(w.total)}</td><td class="n">${money(w.verified)}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">No entries</td></tr>`;
+
+  $("#chips").innerHTML = FILTERS.map(([key, label, fn]) =>
+    `<button class="chip ${state.filter === key ? "on" : ""}" data-filter="${key}">${label} ${payments.filter(fn).length}</button>`).join("");
+
+  const fn = FILTERS.find((f) => f[0] === state.filter)[2];
+  const q = state.q.toLowerCase();
+  const rows = payments.filter(fn).filter((p) => !q ||
+    [p.tx_ref, p.waiter, p.amount, p.id, p.raw_text].some((v) => String(v ?? "").toLowerCase().includes(q)))
+    .slice().reverse();
+  $("#list").innerHTML = rows.length ? rows.map(card).join("") : `<div class="empty">Nothing here</div>`;
+}
+
+function card(p) {
+  const thumb = p.has_photo
+    ? `<img class="thumb" loading="lazy" data-photo="${p.id}" src="api/photo/${p.id}?auth=${encodeURIComponent(AUTH)}" alt="">`
+    : `<div class="thumb">⌨️</div>`;
+  const dup = p.duplicate_of ? `<span class="badge b-dup">DUPLICATE of #${p.duplicate_of}</span> ` : "";
+  const details = [p.qr_data && `QR:\n${p.qr_data}`, p.raw_text && `Text:\n${p.raw_text}`, p.ocr_text && `OCR:\n${p.ocr_text}`]
+    .filter(Boolean).join("\n\n");
+  const editing = state.editing === p.id;
+  return `<div class="pay" data-id="${p.id}">
+    ${thumb}
+    <div class="info">
+      <div class="l1">
+        <span class="ref ${p.tx_ref ? "" : "missing"}">${p.tx_ref ? esc(p.tx_ref) : "no code"}</span>
+        <span class="amt ${p.amount == null ? "missing" : ""}">${money(p.amount)}</span>
+      </div>
+      <div class="meta">#${p.id} · ${p.bank ? `<b>${esc(p.bank)}</b> · ` : ""}${esc(p.waiter)} · ${p.time} · ${dup}<span class="badge b-${p.status}">${p.status}</span></div>
+      ${p.receiver || p.receiver_account ? `<div class="meta">To: ${esc(p.receiver || "")} ${p.receiver_account ? "(" + esc(p.receiver_account) + ")" : ""}${p.payer ? " · From: " + esc(p.payer) : ""}${p.receipt_time ? " · " + esc(p.receipt_time) : ""}</div>` : ""}
+      ${p.flags.map((f) => `<div class="note bad">🚩 ${esc(f)}</div>`).join("")}
+      ${p.bank_check_msg ? `<div class="note ${p.bank_check === "ok" ? "good" : (p.bank_check === "mismatch" || p.bank_check === "not_found") ? "bad" : ""}">${CHECK_ICONS[p.bank_check] || "ℹ️"} ${esc(p.bank_check_msg)}</div>` : ""}
+      ${p.note ? `<div class="note">ℹ️ ${esc(p.note)}</div>` : ""}
+      ${details ? `<details><summary>Details</summary><pre>${esc(details)}</pre></details>` : ""}
+      ${editing ? `<div class="edit">
+          <input data-f="tx_ref" value="${esc(p.tx_ref ?? "")}" placeholder="Transaction code">
+          <input data-f="amount" type="number" step="0.01" inputmode="decimal" value="${p.amount ?? ""}" placeholder="Amount">
+          <button class="small" data-act="save">Save</button><button class="small ghost" data-act="cancel">Cancel</button>
+        </div>` : `<div class="actions">
+          ${p.status !== "verified" ? `<button class="small ok" data-act="verified">✓ Verify</button>` : ""}
+          ${p.status !== "rejected" ? `<button class="small bad" data-act="rejected">✗ Reject</button>` : ""}
+          ${p.status !== "pending" ? `<button class="small ghost" data-act="pending">↺ Undo</button>` : ""}
+          ${p.duplicate_of && p.status === "pending" ? `<button class="small ghost" data-act="notdup">Not a duplicate</button>` : ""}
+          <button class="small ghost" data-act="edit">✎ Edit</button>
+          ${p.tx_ref || p.receipt_url ? `<button class="small ghost" data-act="check">🏦 Check bank</button>` : ""}
+          ${p.receipt_url ? `<button class="small ghost" data-act="open" data-url="${esc(p.receipt_url)}">🔗 Bank receipt</button>` : ""}
+        </div>`}
+    </div>
+  </div>`;
+}
+
+$("#list").addEventListener("click", async (e) => {
+  const photo = e.target.closest("[data-photo]");
+  if (photo) { $("#viewer img").src = photo.src; $("#viewer").style.display = "flex"; return; }
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  const el = btn.closest(".pay"), id = Number(el.dataset.id), act = btn.dataset.act;
+  try {
+    if (act === "edit") { state.editing = id; render(); return; }
+    if (act === "cancel") { state.editing = null; render(); return; }
+    if (act === "open") { tg ? tg.openLink(btn.dataset.url) : window.open(btn.dataset.url, "_blank"); return; }
+    btn.disabled = true;
+    if (act === "check") {
+      btn.textContent = "🏦 Checking…";
+      const r = await api("api/payments/" + id + "/check", "POST");
+      haptic(r.bank_check === "ok" ? "success" : "warning");
+      await load();
+      return;
+    }
+    if (act === "save") {
+      const body = {};
+      el.querySelectorAll("[data-f]").forEach((i) => body[i.dataset.f] = i.value.trim());
+      await api("api/payments/" + id, "PATCH", body);
+      state.editing = null;
+    } else if (act === "notdup") {
+      await api("api/payments/" + id, "PATCH", {clear_duplicate: true});
+    } else {
+      await api("api/payments/" + id, "PATCH", {status: act});
+      haptic(act === "rejected" ? "warning" : "success");
+    }
+    await load();
+  } catch (err) { alertMsg(err.message); btn.disabled = false; }
+});
+
+$("#chips").addEventListener("click", (e) => {
+  const c = e.target.closest("[data-filter]");
+  if (c) { state.filter = c.dataset.filter; render(); }
+});
+$("#search").addEventListener("input", (e) => { state.q = e.target.value.trim(); render(); });
+$("#day").addEventListener("change", async (e) => { state.day = e.target.value; state.editing = null; await load(); });
+$("#refresh").addEventListener("click", load);
+$("#viewer").addEventListener("click", () => { $("#viewer").style.display = "none"; });
+
+$("#saveBank").addEventListener("click", async () => {
+  try {
+    const s = await api(`api/day/${state.day}/bank`, "PUT", {bank_total: $("#bank").value});
+    state.data.summary = s; render(); haptic("success");
+  } catch (err) { alertMsg(err.message); }
+});
+$("#verifyAll").addEventListener("click", async () => {
+  if (!await confirmMsg("Mark every pending entry (with an amount and no duplicate flag) as verified?")) return;
+  try { const r = await api(`api/day/${state.day}/verify-all`, "POST"); haptic("success"); alertMsg(`${r.updated} entries verified`); await load(); }
+  catch (err) { alertMsg(err.message); }
+});
+$("#export").addEventListener("click", async () => {
+  try { await api(`api/day/${state.day}/export`, "POST"); alertMsg("CSV sent to your Telegram chat."); }
+  catch (err) { alertMsg(err.message); }
+});
+
+init();
+</script>
+</body>
+</html>
