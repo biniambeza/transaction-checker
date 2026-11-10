@@ -1,6 +1,7 @@
-"""Dashboard server for the Telegram Mini App (authenticated with Telegram initData)."""
+"""Dashboard and management server for the Telegram Mini App (authenticated with Telegram initData)."""
 import hashlib
 import hmac
+import html
 import json
 import logging
 import re
@@ -8,6 +9,7 @@ import time
 from urllib.parse import parse_qsl
 
 from aiohttp import web
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 
 import banks
 import config
@@ -52,28 +54,49 @@ async def auth_middleware(request: web.Request, handler):
         if not user:
             raise web.HTTPUnauthorized(text="Open this dashboard from the Telegram bot (invalid authentication).")
         uid = user.get("id")
-        if not (db.is_superadmin(uid) or len(db.get_user_owned_businesses(uid)) > 0):
-            raise web.HTTPUnauthorized(text="Access restricted: only registered business owners can access this dashboard.")
+        is_admin = db.is_superadmin(uid)
+        owned_biz = db.get_user_owned_businesses(uid)
+        waiter_biz = db.get_waiter_businesses(uid)
+        if is_admin:
+            role = "superadmin"
+        elif owned_biz:
+            role = "owner"
+        elif waiter_biz:
+            role = "waiter"
+        else:
+            role = "guest"
+
         request["user"] = user
+        request["role"] = role
     return await handler(request)
 
 
-def get_req_business(request: web.Request) -> dict:
+def get_req_business(request: web.Request, required_owner: bool = False) -> dict:
     uid = request["user"]["id"]
-    bid_str = request.query.get("business_id")
-    if bid_str and bid_str.isdigit():
+    is_admin = db.is_superadmin(uid)
+
+    bid_str = request.query.get("business_id") or request.match_info.get("id")
+    if bid_str and str(bid_str).isdigit():
         bid = int(bid_str)
         biz = db.get_business(bid)
-        if biz and (db.is_superadmin(uid) or db.is_business_owner(bid, uid)):
-            return biz
+        if biz:
+            if is_admin or db.is_business_owner(bid, uid):
+                return biz
+            if not required_owner and any(wb["id"] == bid for wb in db.get_waiter_businesses(uid)):
+                return biz
+
     owned = db.get_user_owned_businesses(uid)
     if owned:
         return owned[0]
-    if db.is_superadmin(uid):
+    if is_admin:
         all_b = db.list_businesses()
         if all_b:
             return all_b[0]
-    raise web.HTTPForbidden(text="No accessible business found for your account.")
+    if not required_owner:
+        waiter_b = db.get_waiter_businesses(uid)
+        if waiter_b:
+            return waiter_b[0]
+    raise web.HTTPForbidden(text="No accessible store found for your account.")
 
 
 def _day(request: web.Request) -> str:
@@ -81,6 +104,19 @@ def _day(request: web.Request) -> str:
     if not DAY_RE.fullmatch(day):
         raise web.HTTPBadRequest(text="Bad date")
     return day
+
+
+def _split_accounts(accounts_str: str) -> dict:
+    accs = [a.strip() for a in (accounts_str or "").split(",") if a.strip()]
+    cbe = ""
+    telebirr = ""
+    for a in accs:
+        digits = re.sub(r"\D", "", a)
+        if len(digits) == 13 and digits.startswith("1") and not cbe:
+            cbe = digits
+        elif not telebirr:
+            telebirr = digits or a
+    return {"cbe": cbe, "telebirr": telebirr, "raw": accounts_str or ""}
 
 
 def _serialize(p: dict) -> dict:
@@ -115,17 +151,286 @@ def _serialize(p: dict) -> dict:
     }
 
 
+# ------------------------------------------------------------------ views & endpoints
 async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(WEBAPP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+async def api_me(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    is_admin = db.is_superadmin(uid)
+    user_row = db.get_user(uid)
+    owned = db.list_all_businesses() if is_admin else db.get_user_owned_businesses(uid)
+    waiter_b = db.get_waiter_businesses(uid)
+
+    return web.json_response({
+        "user_id": uid,
+        "name": user_row["name"] if user_row else request["user"].get("first_name", "User"),
+        "role": request["role"],
+        "is_superadmin": is_admin,
+        "active_business_id": user_row.get("active_business_id") if user_row else None,
+        "owned_businesses": owned,
+        "waiter_businesses": waiter_b,
+    })
+
+
+async def api_switch_active_business(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    body = await request.json()
+    bid = int(body.get("business_id", 0))
+    biz = db.get_business(bid)
+    if not biz:
+        raise web.HTTPNotFound(text="Business not found")
+    db.set_user_active_business(uid, bid)
+    return web.json_response({"ok": True, "active_business_id": bid, "business_name": biz["name"]})
+
+
+async def api_join_business(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    u = db.get_user(uid) or {}
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid request payload"}, status=400)
+    code = (data.get("code") or "").strip().lower()
+    custom_name = (data.get("name") or "").strip()
+    if not code:
+        return web.json_response({"error": "Please enter a business join code"}, status=400)
+    biz = db.get_business_by_code(code)
+    if not biz or not biz["active"]:
+        return web.json_response({"error": "Business code not found. Please ask your store owner for the correct code."}, status=404)
+    cashier_name = f"{custom_name} ({u.get('name') or uid})" if custom_name else (u.get("name") or str(uid))
+    if db.is_waiter_active_in_business(biz["id"], uid):
+        return web.json_response({"status": "already_active", "message": f"You are already an active cashier for {biz['name']}."})
+    db.upsert_user(uid, cashier_name, u.get("username"), "waiter")
+    db.add_waiter_to_business(biz["id"], uid, cashier_name, active=0)
+
+    # Notify store owners with approval card
+    bot = request.app.get(BOT_KEY)
+    if bot:
+        owners = db.get_business_owners(biz["id"])
+        owner_ids = {o["tg_id"] for o in owners}
+        owner_ids.update(config.OWNER_IDS)
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Approve Cashier", callback_data=f"waiter_appr:{biz['id']}:{uid}"),
+                InlineKeyboardButton("❌ Decline", callback_data=f"waiter_decl:{biz['id']}:{uid}")
+            ]
+        ])
+        for oid in owner_ids:
+            try:
+                await bot.send_message(
+                    oid,
+                    f"👤 <b>New Cashier Join Request!</b>\n\n"
+                    f"• Store: <b>{html.escape(biz['name'])}</b>\n"
+                    f"• Cashier: <b>{html.escape(cashier_name)}</b>\n"
+                    f"• Telegram ID: <code>{uid}</code>\n\n"
+                    f"Tap below or approve in your WebApp Cashiers tab:",
+                    reply_markup=markup,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+    return web.json_response({"ok": True, "message": f"Join request sent to the owner of {biz['name']}! They will approve you shortly."})
 
 
 async def api_businesses(request: web.Request) -> web.Response:
     uid = request["user"]["id"]
     is_admin = db.is_superadmin(uid)
-    businesses = db.list_businesses() if is_admin else db.get_user_owned_businesses(uid)
+    businesses = db.list_all_businesses() if is_admin else db.get_user_owned_businesses(uid)
     return web.json_response({
         "businesses": businesses,
         "is_superadmin": is_admin
+    })
+
+
+async def api_create_business(request: web.Request) -> web.Response:
+    """Platform owner registers a new business via WebApp input form."""
+    uid = request["user"]["id"]
+    if not db.is_superadmin(uid):
+        raise web.HTTPForbidden(text="Only platform owner can register businesses")
+
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise web.HTTPBadRequest(text="Business name is required")
+
+    code = (body.get("code") or "").strip().lower() or None
+    owner_str = str(body.get("owner_id") or "").strip()
+    cbe = (body.get("cbe") or "").strip()
+    telebirr = (body.get("telebirr") or "").strip()
+    names = (body.get("names") or "").strip()
+
+    accounts = ",".join(x for x in (re.sub(r"\D", "", cbe), re.sub(r"\D", "", telebirr)) if x)
+
+    bid = db.create_business(name=name, code=code, accounts=accounts, names=names)
+    biz = db.get_business(bid)
+
+    owner_id = None
+    if owner_str:
+        if owner_str.isdigit():
+            owner_id = int(owner_str)
+        elif owner_str.startswith("@"):
+            u = db.get_user_by_username(owner_str)
+            if u:
+                owner_id = u["tg_id"]
+
+    if owner_id:
+        db.add_business_owner(bid, owner_id)
+        bot = request.app[BOT_KEY]
+        try:
+            await bot.send_message(
+                owner_id,
+                f"🎉 <b>Welcome! You have been registered as the Owner of {name}!</b>\n\n"
+                f"• Business ID: <code>{bid}</code>\n"
+                f"• Cashier Join Code: <code>{biz['code']}</code>\n\n"
+                f"Open your live WebApp dashboard to set your payment accounts and manage your cashiers.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    return web.json_response({"ok": True, "business": db.get_business(bid)})
+
+
+async def api_business_settings(request: web.Request) -> web.Response:
+    """Store owner saves their CBE, telebirr, legal names, and join code via WebApp form."""
+    biz = get_req_business(request, required_owner=True)
+    body = await request.json()
+
+    cbe = (body.get("cbe") or "").strip()
+    telebirr = (body.get("telebirr") or "").strip()
+    names = (body.get("names") or "").strip()
+    code = (body.get("code") or "").strip().lower()
+
+    updates = {}
+    if names:
+        updates["names"] = names
+
+    # Clean accounts
+    clean_cbe = re.sub(r"\D", "", cbe) if cbe else None
+    clean_tb = re.sub(r"\D", "", telebirr) if telebirr else None
+
+    # Current accounts
+    current = [a.strip() for a in (biz["accounts"] or "").split(",") if a.strip()]
+    other = [a for a in current if not (len(re.sub(r"\D", "", a)) == 13 and re.sub(r"\D", "", a).startswith("1"))
+             and not (len(re.sub(r"\D", "", a)) in (10, 12) and (re.sub(r"\D", "", a).startswith("09") or re.sub(r"\D", "", a).startswith("2519")))]
+
+    new_accs = []
+    if clean_cbe:
+        new_accs.append(clean_cbe)
+    if clean_tb:
+        new_accs.append(clean_tb)
+    new_accs.extend(other)
+
+    if new_accs:
+        updates["accounts"] = ",".join(new_accs)
+
+    if code and code != biz["code"]:
+        existing = db.get_business_by_code(code)
+        if existing and existing["id"] != biz["id"]:
+            raise web.HTTPBadRequest(text="That cashier code is already taken. Please choose another.")
+        updates["code"] = code
+
+    if updates:
+        db.update_business(biz["id"], **updates)
+
+    updated_biz = db.get_business(biz["id"])
+    return web.json_response({
+        "ok": True,
+        "business": updated_biz,
+        "accounts_split": _split_accounts(updated_biz["accounts"])
+    })
+
+
+async def api_business_waiters(request: web.Request) -> web.Response:
+    """Lists registered and pending cashiers for the business."""
+    biz = get_req_business(request, required_owner=True)
+    waiters = db.get_waiters_for_business(biz["id"])
+    return web.json_response({
+        "waiters": waiters,
+        "business": biz
+    })
+
+
+async def api_add_waiter(request: web.Request) -> web.Response:
+    """Store owner registers a cashier via WebApp form."""
+    biz = get_req_business(request, required_owner=True)
+    body = await request.json()
+
+    target_str = str(body.get("tg_id") or "").strip()
+    counter_name = (body.get("counter_name") or "").strip()
+
+    target_id = None
+    if target_str.isdigit():
+        target_id = int(target_str)
+    elif target_str.startswith("@"):
+        u = db.get_user_by_username(target_str)
+        if u:
+            target_id = u["tg_id"]
+            if not counter_name:
+                counter_name = u["name"]
+
+    if not target_id:
+        raise web.HTTPBadRequest(text="Please enter a valid numeric Telegram ID or existing username.")
+
+    name_display = counter_name or f"Cashier {target_id}"
+    db.upsert_user(target_id, name_display, None, "waiter")
+    db.add_waiter_to_business(biz["id"], target_id, name_display, active=1)
+
+    # Send welcome to waiter
+    bot = request.app[BOT_KEY]
+    try:
+        await bot.send_message(
+            target_id,
+            f"🎉 <b>You have been registered as a cashier for {biz['name']}!</b>\n\n"
+            f"Counter Name: <b>{name_display}</b>\n"
+            f"You can now take photos of customer receipts and send them here.",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+    return web.json_response({
+        "ok": True,
+        "waiters": db.get_waiters_for_business(biz["id"])
+    })
+
+
+async def api_update_waiter_status(request: web.Request) -> web.Response:
+    """Approve or deactivate a cashier."""
+    biz = get_req_business(request, required_owner=True)
+    wid = int(request.match_info["wid"])
+    body = await request.json()
+    active = bool(body.get("active", True))
+
+    db.set_business_waiter_active(biz["id"], wid, active)
+
+    bot = request.app[BOT_KEY]
+    if active:
+        try:
+            await bot.send_message(
+                wid,
+                f"🎉 <b>Your registration for {biz['name']} was APPROVED by the owner!</b>\n"
+                f"You can now submit customer receipts for {biz['name']}.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    return web.json_response({
+        "ok": True,
+        "waiters": db.get_waiters_for_business(biz["id"])
+    })
+
+
+async def api_delete_waiter(request: web.Request) -> web.Response:
+    biz = get_req_business(request, required_owner=True)
+    wid = int(request.match_info["wid"])
+    db.remove_waiter_from_business(biz["id"], wid)
+    return web.json_response({
+        "ok": True,
+        "waiters": db.get_waiters_for_business(biz["id"])
     })
 
 
@@ -150,6 +455,7 @@ async def api_report_data(request: web.Request) -> web.Response:
 
     return web.json_response({
         "business": biz,
+        "accounts_split": _split_accounts(biz["accounts"]),
         "currency": biz.get("currency") or config.CURRENCY,
         "period_type": period_type,
         "period_value": period_val,
@@ -307,7 +613,16 @@ async def start_web(bot) -> web.AppRunner:
     app[BOT_KEY] = bot
     app.add_routes([
         web.get("/", index),
+        web.get("/api/me", api_me),
+        web.post("/api/switch-business", api_switch_active_business),
+        web.post("/api/join", api_join_business),
         web.get("/api/businesses", api_businesses),
+        web.post("/api/businesses", api_create_business),
+        web.put("/api/business/{id}/settings", api_business_settings),
+        web.get("/api/business/{id}/waiters", api_business_waiters),
+        web.post("/api/business/{id}/waiters", api_add_waiter),
+        web.patch("/api/business/{id}/waiters/{wid:\\d+}", api_update_waiter_status),
+        web.delete("/api/business/{id}/waiters/{wid:\\d+}", api_delete_waiter),
         web.get("/api/report-data", api_report_data),
         web.get("/api/pdf", api_pdf),
         web.get("/api/days", api_days),

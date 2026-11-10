@@ -25,52 +25,35 @@ log = logging.getLogger(__name__)
 H = html.escape
 
 WAITER_HELP = (
-    "👋 <b>Cashier Guide — How to submit transactions</b>\n\n"
-    "📸 <b>Take a photo</b> of the customer's payment screen / receipt (CBE, telebirr, BoA, any bank) — ensure the QR code and amount are clear.\n"
-    "   You can add the amount as a caption, e.g. <code>450</code>\n\n"
-    "⌨️ <b>Or type</b> the transaction code and amount:\n"
-    "   <code>FT263113HT19 450</code>\n"
-    "   (Forwarding the bank SMS confirmation also works).\n\n"
-    "⚠️ <b>Important:</b> Payments MUST be sent to your store's registered accounts (CBE / telebirr). "
-    "Payments sent to other accounts are automatically <b>REJECTED</b> as invalid.\n\n"
-    "🔄 <b>Working for multiple stores?</b>\n"
-    "   Use <code>/switch</code> anytime to change which business you are submitting for.\n\n"
-    "👤 <b>Set your counter name:</b>\n"
-    "   <code>/name Counter 1</code> or <code>/name Counter 2 - Meron</code>\n\n"
-    "/today – view your sales and transactions today\n"
-    "/undo – cancel/delete your last entry"
+    "👋 <b>Cashier / Waiter Guide</b>\n\n"
+    "📸 <b>Submit Transactions:</b>\n"
+    "• Take a photo of the customer's payment screen (CBE, telebirr, BoA, any bank) and send it directly to this chat.\n"
+    "• Or forward the bank SMS confirmation, or type the transaction code and amount (e.g. <code>FT263113HT19 450</code>).\n\n"
+    "🔒 <b>Anti-Fake Protection:</b>\n"
+    "The bot automatically verifies if the receipt is genuine and confirms the money went to your store owner's CBE / telebirr account.\n\n"
+    "📱 <b>Your Dashboard:</b>\n"
+    "Tap the <b>📱 Open Dashboard</b> button below at any time to view your sales and transactions today."
 )
 
 OWNER_HELP = (
-    "👑 <b>Business Owner Commands</b>\n\n"
-    "📊 <b>Reports & Dashboard:</b>\n"
-    "/report – open live WebApp dashboard\n"
-    "/summary [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – sales totals by cashier, bank & customer\n"
-    "/pdf [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – download publication-grade PDF report\n"
-    "/export [today | yesterday | YYYY-MM-DD | YYYY-MM | YYYY] – download CSV spreadsheet for Excel\n\n"
-    "🏦 <b>Payment Accounts (Anti-Fake Fraud Rules):</b>\n"
-    "<i>All customer payments must go to your registered accounts. Other transactions are rejected as invalid.</i>\n"
-    "/setcbe &lt;13-digit-cbe-account&gt; – set your CBE account (e.g. <code>/setcbe 1000123456076</code>)\n"
-    "/settelebirr &lt;phone-or-merchant&gt; – set telebirr (e.g. <code>/settelebirr 0911223344</code>)\n"
-    "/setaccounts &lt;cbe,telebirr&gt; – set multiple accounts\n"
-    "/setnames &lt;Store Legal Names&gt; – set account holder name(s)\n"
-    "/mybusiness – view your business profile, accounts & stats\n\n"
-    "👥 <b>Cashier Management (Owner-Controlled):</b>\n"
-    "/addwaiter &lt;tg_id&gt; [Counter Name] – register a cashier directly\n"
-    "/cashiers – list all cashiers & counters\n"
-    "/remove &lt;cashier_id&gt; – deactivate a cashier\n"
-    "/code &lt;new_code&gt; – change the cashier join request code\n"
-    "/switch – switch active business (if you own multiple)"
+    "🏢 <b>Store Owner Portal</b>\n\n"
+    "Welcome! You can manage everything directly inside your <b>interactive WebApp dashboard</b> — no slash commands needed!\n\n"
+    "📱 <b>Tap '📱 Open Dashboard & Store Settings' below to:</b>\n"
+    "• 📊 <b>Sales & Reports:</b> View daily, monthly, and yearly sales totals, top customers, cashier performance, and download PDF / Excel reports.\n"
+    "• 🏦 <b>Accounts Setup:</b> Enter your CBE 13-digit account, telebirr phone/till number, and legal store names using simple input fields.\n"
+    "• 👥 <b>Cashiers:</b> Add cashiers by their Telegram ID or username, approve pending join requests, or deactivate cashiers with 1 tap.\n\n"
+    "🔒 <i>All customer payments must go to your registered accounts; payments to other accounts are automatically rejected as invalid.</i>"
 )
 
 SUPERADMIN_HELP = (
-    "⚡ <b>Platform Owner Commands (You control everything)</b>\n\n"
-    "👑 <b>Register & Onboard Business Clients:</b>\n"
-    "• <code>/registerowner &lt;tg_id&gt; &lt;Business Name&gt;</code> – onboard a new cafe / supermarket owner in one step!\n"
-    "  <i>(Tip: Forward any message from the owner and reply with <code>/registerowner Business Name</code>)</i>\n"
-    "• <code>/setowner &lt;biz_id_or_code&gt; &lt;tg_id&gt;</code> – assign or change the owner of any business\n"
-    "• <code>/allbusinesses</code> – list all registered businesses on the platform\n\n"
-    + OWNER_HELP
+    "👑 <b>Platform Super Admin Portal</b>\n\n"
+    "Welcome! You are the platform owner and control all businesses and clients.\n\n"
+    "📱 <b>Everything is managed through interactive forms in your WebApp:</b>\n"
+    "• ⚡ <b>Onboard Businesses:</b> Open the dashboard → Go to <b>⚡ Super Admin</b> tab → Enter the client's store name, owner Telegram ID, CBE, and telebirr.\n"
+    "• 🏢 <b>Assign Owners:</b> Give cafe and supermarket owners full management access.\n"
+    "• 🏦 <b>Account & Fraud Rules:</b> Set receiving accounts so fraud is blocked automatically.\n"
+    "• 📊 <b>Platform-Wide Reports:</b> Monitor all transactions, daily/monthly revenue, and export PDF statements.\n\n"
+    "<i>Tap the button below to open your dashboard:</i>"
 )
 
 CHECK_ICONS = {"ok": "✅", "mismatch": "🔴", "not_found": "🔴", "error": "⚠️", "unsupported": "ℹ️"}
@@ -119,7 +102,7 @@ def dashboard_markup() -> InlineKeyboardMarkup | None:
     if not config.WEBAPP_URL:
         return None
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("📊 Open Dashboard", web_app=WebAppInfo(url=config.WEBAPP_URL + "/"))]]
+        [[InlineKeyboardButton("📱 Open Dashboard & Store Settings", web_app=WebAppInfo(url=config.WEBAPP_URL + "/"))]]
     )
 
 
@@ -368,16 +351,16 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     elif waiter_biz:
         active = get_active_business(u.id)
         name = active["name"] if active else "your store"
-        await msg.reply_html(f"👋 Welcome back! Active store: <b>{H(name)}</b>\n\n" + WAITER_HELP)
+        await msg.reply_html(f"👋 Welcome back! Active store: <b>{H(name)}</b>\n\n" + WAITER_HELP,
+                             reply_markup=dashboard_markup())
     else:
         await msg.reply_html(
-            f"👋 <b>Welcome to the Transaction Checker!</b>\n\n"
+            f"👋 <b>Welcome to Kifiya Transaction Checker!</b>\n\n"
             f"Your Telegram User ID is: <code>{u.id}</code>\n\n"
-            f"🔒 <b>Only the business owner can register cashiers.</b>\n"
-            f"Give your Telegram ID (<code>{u.id}</code>) to your store owner so they can register you with:\n"
-            f"<code>/addwaiter {u.id} [Counter Name]</code>\n\n"
-            f"Or if your store owner provided a join code, send:\n"
-            f"<code>/join &lt;code&gt; [Counter Name]</code> (your registration will be sent to the owner for approval)."
+            f"🔒 <b>Cashier Access:</b>\n"
+            f"Share your Telegram ID (<code>{u.id}</code>) with your store owner so they can register you in their dashboard.\n\n"
+            f"Or tap <b>📱 Open Dashboard</b> below to enter your store's join code and request access!",
+            reply_markup=dashboard_markup()
         )
 
 
@@ -1435,6 +1418,13 @@ OWNER_COMMANDS = [
 
 async def setup_bot(app: Application) -> None:
     await app.bot.set_my_commands(WAITER_COMMANDS)
+    if config.WEBAPP_URL:
+        try:
+            await app.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp("📱 Dashboard", WebAppInfo(url=config.WEBAPP_URL + "/"))
+            )
+        except Exception as e:
+            log.info("Global menu button setup skipped: %s", e)
     for oid in config.OWNER_IDS:
         await setup_owner_chat(app.bot, oid)
 

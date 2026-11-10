@@ -86,7 +86,8 @@ def local_datetime(iso_utc: str) -> str:
     return datetime.fromisoformat(iso_utc).astimezone(TZ).strftime("%Y-%m-%d %H:%M")
 
 
-def money(value) -> str:
+def money(value, currency: str | None = None) -> str:
     if value is None:
         return "—"
-    return f"{value:,.2f}" + (f" {CURRENCY}" if CURRENCY else "")
+    curr = currency if currency is not None else CURRENCY
+    return f"{value:,.2f}" + (f" {curr}" if curr else "")

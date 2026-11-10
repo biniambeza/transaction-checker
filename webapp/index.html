@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Transaction Dashboard</title>
+<title>Transaction Platform Dashboard</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root {
@@ -19,27 +19,59 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg2); color: var(--text);
          font: 14.5px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 820px; margin: 0 auto; padding: 12px 12px 50px; }
+  main { max-width: 840px; margin: 0 auto; padding: 10px 12px 60px; }
+  
+  /* Top Bar */
+  .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; flex-wrap: wrap; }
+  .header-biz { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px; }
+  .header-biz h1 { margin: 0; font-size: 18px; font-weight: 700; }
+  .badge-role { font-size: 11px; padding: 2px 7px; border-radius: 6px; font-weight: 600; text-transform: uppercase; }
+  .role-superadmin { background: #6c5ce7; color: #fff; }
+  .role-owner { background: var(--btn); color: #fff; }
+  .role-waiter { background: var(--hint); color: #fff; }
+
+  /* Navigation Tabs */
+  .main-nav { display: flex; background: var(--bg); border-radius: 12px; padding: 4px; gap: 4px; margin-bottom: 14px;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow-x: auto; }
+  .nav-btn { flex: 1; padding: 8px 12px; border: 0; background: transparent; color: var(--hint);
+             font-weight: 600; font-size: 13px; border-radius: 9px; cursor: pointer; white-space: nowrap; text-align: center; }
+  .nav-btn.active { background: var(--btn); color: var(--btn-text); }
+
+  /* Forms & Inputs */
   .bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   select, input, button { font: inherit; color: var(--text); }
   select, input { background: var(--bg); border: 1px solid color-mix(in srgb, var(--hint) 35%, transparent);
-                  border-radius: 10px; padding: 8px 10px; min-width: 0; }
+                  border-radius: 10px; padding: 9px 12px; min-width: 0; }
   select { flex: 1; min-width: 130px; }
-  button { border: 0; border-radius: 10px; padding: 8px 12px; background: var(--btn); color: var(--btn-text);
-           cursor: pointer; white-space: nowrap; font-weight: 500; }
+  button { border: 0; border-radius: 10px; padding: 9px 14px; background: var(--btn); color: var(--btn-text);
+           cursor: pointer; white-space: nowrap; font-weight: 600; font-size: 13.5px; }
   button.ghost { background: var(--bg); color: var(--link); border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent); }
-  button.small { padding: 5px 9px; font-size: 12.5px; border-radius: 8px; }
-  button.ok { background: var(--ok); color: #fff; } button.bad { background: var(--bad); color: #fff; }
+  button.small { padding: 5px 9px; font-size: 12px; border-radius: 8px; }
+  button.ok { background: var(--ok); color: #fff; }
+  button.bad { background: var(--bad); color: #fff; }
+  button.warn { background: var(--warn); color: #fff; }
+  
   .card { background: var(--bg); border-radius: 14px; padding: 14px; margin-bottom: 12px;
           box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--hint); margin: 0 0 10px; font-weight: 600; }
   
-  /* Tabs for Period */
+  /* Form Groups */
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--hint); margin-bottom: 4px; text-transform: uppercase; }
+  .form-group input, .form-group select { width: 100%; }
+  .form-help { font-size: 11.5px; color: var(--hint); margin-top: 3px; }
+
+  .notice-box { background: color-mix(in srgb, var(--link) 10%, var(--bg)); border-left: 4px solid var(--link);
+                border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; }
+  .notice-box.warn { background: color-mix(in srgb, var(--warn) 10%, var(--bg)); border-left-color: var(--warn); }
+
+  /* Period Tabs */
   .period-tabs { display: flex; background: var(--bg2); padding: 3px; border-radius: 10px; gap: 4px; margin-bottom: 10px; }
   .period-tab { flex: 1; text-align: center; padding: 6px 10px; font-size: 13px; font-weight: 600; border-radius: 8px;
                 border: 0; background: transparent; color: var(--hint); cursor: pointer; }
   .period-tab.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
 
+  /* KPIs */
   .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .stat { background: var(--bg2); border-radius: 10px; padding: 9px 12px; }
   .stat .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -50,15 +82,18 @@
   .diff { margin-top: 8px; font-weight: 600; font-size: 13px; }
   .diff.ok { color: var(--ok); } .diff.bad { color: var(--bad); }
 
+  /* Tables */
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13.5px; }
-  td, th { padding: 7px 6px; text-align: left; border-bottom: 1px solid var(--bg2); }
+  td, th { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--bg2); }
   th { font-size: 12px; color: var(--hint); font-weight: 600; } td.n, th.n { text-align: right; }
   
+  /* Chips */
   .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 10px; }
   .chip { background: var(--bg2); color: var(--text); border-radius: 999px; padding: 5px 12px; font-size: 12.5px;
           border: 0; white-space: nowrap; cursor: pointer; }
   .chip.on { background: var(--btn); color: var(--btn-text); font-weight: 600; }
   
+  /* Payment Cards */
   .pay { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--bg2); }
   .pay:last-child { border-bottom: 0; }
   .thumb { width: 68px; height: 68px; border-radius: 10px; object-fit: cover; background: var(--bg2); flex: none;
@@ -84,80 +119,217 @@
             justify-content: center; z-index: 100; cursor: pointer; }
   #viewer img { max-width: 95%; max-height: 95%; border-radius: 8px; }
   #msg { text-align: center; padding: 50px 16px; color: var(--hint); font-size: 15px; }
-  .header-biz { margin-bottom: 8px; }
-  .header-biz h1 { margin: 0; font-size: 18px; font-weight: 700; }
 </style>
 </head>
 <body>
 <main>
-  <div id="msg">Loading dashboard…</div>
+  <div id="msg">Loading…</div>
   <div id="app" hidden>
-    <div class="header-biz">
-      <h1 id="bizTitle">My Store</h1>
-    </div>
-
-    <!-- Business & Period Selection -->
-    <div class="bar">
-      <select id="bizSelect" style="display:none;"></select>
-      <select id="periodValSelect"></select>
-      <button class="ghost" id="btnPdf" title="Download PDF Report">📄 PDF</button>
-      <button class="ghost" id="export" title="Export CSV">📥 CSV</button>
-      <button class="ghost" id="refresh" title="Refresh">↻</button>
-    </div>
-
-    <div class="period-tabs">
-      <button class="period-tab active" data-period="day">Daily</button>
-      <button class="period-tab" data-period="month">Monthly</button>
-      <button class="period-tab" data-period="year">Yearly</button>
-    </div>
-
-    <!-- Summary KPIs -->
-    <section class="card">
-      <h2 id="kpiHeading">Sales Summary</h2>
-      <div class="stats" id="stats"></div>
-    </section>
-
-    <!-- Daily Bank Reconciliation (shown for day view) -->
-    <section class="card" id="bankCheckSection">
-      <h2>Reconcile with Bank Statement</h2>
-      <div class="row">
-        <input id="bank" type="number" inputmode="decimal" step="0.01" placeholder="Bank statement closing total">
-        <button id="saveBank">Save</button>
+    
+    <!-- Top Bar with Store Selection and Role Badge -->
+    <div class="header-bar">
+      <div class="header-biz">
+        <h1 id="bizTitle">Store</h1>
+        <span class="badge-role" id="roleBadge">Owner</span>
       </div>
-      <div class="diff" id="diff"></div>
-    </section>
-
-    <!-- Sales by Cashier / Waiter -->
-    <section class="card">
-      <h2>Sales by Cashier / Waiter</h2>
-      <table><thead><tr><th>Cashier / Counter</th><th class="n">Tx</th><th class="n">Total</th><th class="n">Verified</th></tr></thead>
-        <tbody id="waiters"></tbody></table>
-    </section>
-
-    <!-- Top Paying Customers -->
-    <section class="card">
-      <h2>Top Paying Customers</h2>
-      <table><thead><tr><th>Customer (Payer)</th><th class="n">Payments</th><th class="n">Total Spent</th></tr></thead>
-        <tbody id="customers"></tbody></table>
-    </section>
-
-    <!-- Sales by Payment System / Bank -->
-    <section class="card">
-      <h2>By Payment System / Bank</h2>
-      <table><thead><tr><th>Bank / System</th><th class="n">Sales</th><th class="n">Total Amount</th></tr></thead>
-        <tbody id="banks"></tbody></table>
-    </section>
-
-    <!-- Transaction Ledger -->
-    <section class="card">
-      <div class="row" style="justify-content:space-between;margin-bottom:8px">
-        <h2 style="margin:0">Transactions Ledger</h2>
-        <button class="small ok" id="verifyAll">Verify all pending</button>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <select id="bizSelect" style="display:none;"></select>
+        <button class="ghost small" id="refresh" title="Refresh data">↻</button>
       </div>
-      <input id="search" type="search" placeholder="Search customer, cashier, code, bank, amount…" style="width:100%;margin-bottom:8px">
-      <div class="chips" id="chips"></div>
-      <div id="list"></div>
-    </section>
+    </div>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="main-nav">
+      <button class="nav-btn active" data-tab="tabSales">📊 Sales & Reports</button>
+      <button class="nav-btn" data-tab="tabAccounts" id="navAccounts">🏦 Accounts Setup</button>
+      <button class="nav-btn" data-tab="tabWaiters" id="navWaiters">👥 Cashiers</button>
+      <button class="nav-btn" data-tab="tabAdmin" id="navAdmin" style="display:none;">⚡ Super Admin</button>
+    </nav>
+
+    <!-- TAB 1: Sales & Reports -->
+    <div id="tabSales" class="tab-pane">
+      <div class="bar">
+        <select id="periodValSelect"></select>
+        <button class="ghost" id="btnPdf" title="Download PDF Report">📄 PDF</button>
+        <button class="ghost" id="export" title="Export CSV">📥 CSV</button>
+      </div>
+
+      <div class="period-tabs">
+        <button class="period-tab active" data-period="day">Daily</button>
+        <button class="period-tab" data-period="month">Monthly</button>
+        <button class="period-tab" data-period="year">Yearly</button>
+      </div>
+
+      <!-- Summary KPIs -->
+      <section class="card">
+        <h2 id="kpiHeading">Sales Summary</h2>
+        <div class="stats" id="stats"></div>
+      </section>
+
+      <!-- Bank Statement Reconciliation (Daily only) -->
+      <section class="card" id="bankCheckSection">
+        <h2>Reconcile with Bank Statement</h2>
+        <div class="row">
+          <input id="bank" type="number" inputmode="decimal" step="0.01" placeholder="Bank statement closing total">
+          <button id="saveBank">Save Total</button>
+        </div>
+        <div class="diff" id="diff"></div>
+      </section>
+
+      <!-- Sales by Cashier / Waiter -->
+      <section class="card">
+        <h2>Sales by Cashier / Waiter</h2>
+        <table><thead><tr><th>Cashier / Counter</th><th class="n">Tx</th><th class="n">Total</th><th class="n">Verified</th></tr></thead>
+          <tbody id="waiters"></tbody></table>
+      </section>
+
+      <!-- Top Paying Customers -->
+      <section class="card">
+        <h2>Top Paying Customers</h2>
+        <table><thead><tr><th>Customer (Payer)</th><th class="n">Payments</th><th class="n">Total Spent</th></tr></thead>
+          <tbody id="customers"></tbody></table>
+      </section>
+
+      <!-- Sales by Payment System / Bank -->
+      <section class="card">
+        <h2>By Payment System / Bank</h2>
+        <table><thead><tr><th>Bank / System</th><th class="n">Sales</th><th class="n">Total Amount</th></tr></thead>
+          <tbody id="banks"></tbody></table>
+      </section>
+
+      <!-- Transactions Ledger -->
+      <section class="card">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h2 style="margin:0">Transactions Ledger</h2>
+          <button class="small ok" id="verifyAll">Verify clean pending</button>
+        </div>
+        <input id="search" type="search" placeholder="Search customer, cashier, code, bank, amount…" style="width:100%;margin-bottom:8px">
+        <div class="chips" id="chips"></div>
+        <div id="list"></div>
+      </section>
+    </div>
+
+    <!-- TAB 2: Payment Accounts & Anti-Fake Setup -->
+    <div id="tabAccounts" class="tab-pane" style="display:none;">
+      <section class="card">
+        <h2>🏦 Store Payment Receiving Accounts</h2>
+        <div class="notice-box">
+          🔒 <b>Strict Anti-Fraud Protection:</b> All customer transactions are verified against these receiving accounts. Any receipt sent to another account will be automatically <b>REJECTED</b> as invalid.
+        </div>
+
+        <form id="formAccounts">
+          <div class="form-group">
+            <label>Commercial Bank of Ethiopia (CBE) Account</label>
+            <input type="text" id="inpCbe" placeholder="e.g. 1000123456076 (13 digits)">
+            <div class="form-help">Your 13-digit CBE account. Used for automated live bank verification.</div>
+          </div>
+
+          <div class="form-group">
+            <label>telebirr Phone or Merchant Till Number</label>
+            <input type="text" id="inpTelebirr" placeholder="e.g. 0911223344 or 582910">
+            <div class="form-help">Your telebirr phone number or merchant till code.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Legal Account Holder Name(s)</label>
+            <input type="text" id="inpNames" placeholder="e.g. Bole Cafe PLC, Abebe Kebede">
+            <div class="form-help">The exact legal names that appear on your bank transfer receipts.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Cashier Join Code</label>
+            <input type="text" id="inpCode" placeholder="e.g. bolecafe">
+            <div class="form-help">The join code cashiers use when requesting to join your store.</div>
+          </div>
+
+          <button type="submit" class="ok" style="width:100%; padding:11px;">💾 Save Accounts & Fraud Rules</button>
+        </form>
+      </section>
+    </div>
+
+    <!-- TAB 3: Cashiers & Waiters Management -->
+    <div id="tabWaiters" class="tab-pane" style="display:none;">
+      <section class="card">
+        <h2>➕ Register a New Cashier / Waiter</h2>
+        <div class="notice-box">
+          🔒 <b>Owner-Controlled Access:</b> Only cashiers registered or approved by you can submit transactions for this store.
+        </div>
+
+        <form id="formAddWaiter">
+          <div class="form-group">
+            <label>Cashier Telegram ID or @Username</label>
+            <input type="text" id="inpWaiterId" placeholder="e.g. 987654321 or @username" required>
+            <div class="form-help">Ask the cashier to send /start to @kifiya_checker_bot to see their Telegram ID.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Counter / Display Name</label>
+            <input type="text" id="inpCounterName" placeholder="e.g. Counter 1 - Meron" required>
+            <div class="form-help">This name will appear on all transaction cards and reports.</div>
+          </div>
+
+          <button type="submit" class="ok" style="width:100%; padding:10px;">➕ Register Cashier</button>
+        </form>
+      </section>
+
+      <!-- Pending Approval Requests -->
+      <section class="card" id="pendingWaitersCard" style="display:none;">
+        <h2 style="color:var(--warn)">⏳ Pending Join Requests</h2>
+        <div id="pendingWaitersList"></div>
+      </section>
+
+      <!-- Active Cashiers List -->
+      <section class="card">
+        <h2>Registered Cashiers</h2>
+        <div id="registeredWaitersList">Loading cashiers…</div>
+      </section>
+    </div>
+
+    <!-- TAB 4: Platform Super Admin (Only visible to You) -->
+    <div id="tabAdmin" class="tab-pane" style="display:none;">
+      <section class="card">
+        <h2>🏢 Onboard a New Business Client</h2>
+        <div class="notice-box">
+          👑 <b>Platform Super Admin:</b> Register a new cafe or supermarket client here. They will immediately receive access as the Business Owner.
+        </div>
+
+        <form id="formNewBusiness">
+          <div class="form-group">
+            <label>Business / Store Name</label>
+            <input type="text" id="inpNewBizName" placeholder="e.g. Friendship Supermarket" required>
+          </div>
+
+          <div class="form-group">
+            <label>Owner Telegram ID or @Username</label>
+            <input type="text" id="inpNewBizOwner" placeholder="e.g. 987654321 or @client_owner">
+            <div class="form-help">The client's Telegram ID. They will be assigned as the store owner.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Cashier Join Code (optional)</label>
+            <input type="text" id="inpNewBizCode" placeholder="e.g. friendship">
+          </div>
+
+          <div class="form-group">
+            <label>Store CBE Account (optional)</label>
+            <input type="text" id="inpNewBizCbe" placeholder="e.g. 1000123456076">
+          </div>
+
+          <div class="form-group">
+            <label>Store telebirr (optional)</label>
+            <input type="text" id="inpNewBizTb" placeholder="e.g. 0911223344">
+          </div>
+
+          <button type="submit" class="ok" style="width:100%; padding:11px;">🏢 Register & Onboard Store</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>All Platform Stores</h2>
+        <div id="allStoresList">Loading stores…</div>
+      </section>
+    </div>
+
   </div>
 </main>
 <div id="viewer"><img alt="Receipt Fullscreen"></div>
@@ -175,7 +347,7 @@ const money = (v) => v == null ? "—" :
   Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " " + CURRENCY;
 
 const state = {
-  businesses: [],
+  me: null,
   activeBizId: null,
   periodType: "day",
   periodValue: "",
@@ -215,29 +387,87 @@ function haptic(kind) { try { tg.HapticFeedback.notificationOccurred(kind); } ca
 
 async function init() {
   if (!AUTH) {
-    $("#msg").textContent = "Open this dashboard from the Telegram bot (/report).";
+    $("#msg").textContent = "Please open this dashboard from inside the Telegram bot.";
     return;
   }
   try {
-    const bizResp = await api("api/businesses");
-    state.businesses = bizResp.businesses || [];
-    if (!state.businesses.length) {
-      $("#msg").textContent = "No businesses found under your ownership.";
+    const me = await api("api/me");
+    state.me = me;
+
+    // Set role badge
+    const roleBadge = $("#roleBadge");
+    roleBadge.className = "badge-role role-" + me.role;
+    roleBadge.textContent = me.role === "superadmin" ? "Platform Owner 👑" :
+                           (me.role === "owner" ? "Store Owner 🏢" : "Cashier 🛒");
+
+    if (me.is_superadmin) {
+      $("#navAdmin").style.display = "inline-block";
+    }
+
+    if (!me.is_superadmin && me.role !== "owner") {
+      $("#navAccounts").style.display = "none";
+      $("#navWaiters").style.display = "none";
+    }
+
+    const stores = me.owned_businesses.length ? me.owned_businesses : me.waiter_businesses;
+    if (!stores.length) {
+      $("#msg").innerHTML = `
+        <div class="card" style="text-align:center; padding: 24px 16px;">
+          <h2 style="font-size:16px; margin-bottom:8px; color:var(--text);">👋 Welcome to Transaction Checker</h2>
+          <p style="color:var(--hint); font-size:13px; line-height:1.5; margin: 0 0 16px;">
+            Your Telegram User ID is: <b style="color:var(--text); font-family:monospace; font-size:14px; background:var(--bg2); padding:2px 6px; border-radius:4px;">${me.id}</b><br>
+            Give this ID to your store owner so they can register you in their dashboard.
+          </p>
+          <div style="border-top:1px solid var(--bg2); padding-top:16px; text-align:left;">
+            <h3 style="font-size:12px; text-transform:uppercase; color:var(--hint); margin:0 0 10px; font-weight:600;">Or Request to Join Store</h3>
+            <form id="formGuestJoin">
+              <div class="form-group">
+                <label>Store Join Code</label>
+                <input type="text" id="inpGuestCode" placeholder="e.g. bolecafe" required>
+              </div>
+              <div class="form-group">
+                <label>Your Counter / Display Name</label>
+                <input type="text" id="inpGuestName" placeholder="e.g. Counter 1 - Meron" required>
+              </div>
+              <button type="submit" class="ok" style="width:100%; padding:11px;">Request Access</button>
+            </form>
+          </div>
+        </div>
+      `;
+      document.getElementById("formGuestJoin").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const code = document.getElementById("inpGuestCode").value.trim();
+        const name = document.getElementById("inpGuestName").value.trim();
+        try {
+          const res = await api("api/join", "POST", {code, name});
+          haptic("success");
+          alertMsg(res.message || "Registration request sent to store owner!");
+        } catch (err) {
+          alertMsg(err.message);
+        }
+      });
       return;
     }
 
-    state.activeBizId = state.businesses[0].id;
+    state.activeBizId = me.active_business_id || stores[0].id;
 
-    if (state.businesses.length > 1 || bizResp.is_superadmin) {
+    if (stores.length > 1 || me.is_superadmin) {
       const bSel = $("#bizSelect");
       bSel.style.display = "inline-block";
-      bSel.innerHTML = state.businesses.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join("");
+      bSel.innerHTML = stores.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join("");
       bSel.value = state.activeBizId;
     }
 
     $("#msg").hidden = true;
     $("#app").hidden = false;
+
+    // Load initial data
     await loadReport();
+    if (me.is_superadmin || me.role === "owner") {
+      await loadAccountsForm();
+      await loadWaitersTab();
+    }
+    if (me.is_superadmin) await loadAllStores();
   } catch (e) {
     $("#msg").textContent = e.message;
   }
@@ -256,11 +486,7 @@ async function loadReport() {
     CURRENCY = d.currency || "ETB";
 
     $("#bizTitle").textContent = d.business.name;
-
-    // Populate period selector options
     populatePeriodOptions(d.recent_periods, d.period_type, d.period_value);
-
-    // Show/hide bank check for day view
     $("#bankCheckSection").style.display = (state.periodType === "day") ? "block" : "none";
 
     render();
@@ -297,7 +523,6 @@ function populatePeriodOptions(recents, type, currentVal) {
 
 function render() {
   const { summary: s, payments, period_type, period_value } = state.data;
-
   const pLabel = period_type === "year" ? `Year ${period_value}` :
                  (period_type === "month" ? `Month ${period_value}` : period_value);
   $("#kpiHeading").textContent = `Sales Summary — ${pLabel}`;
@@ -394,7 +619,277 @@ function card(p) {
   </div>`;
 }
 
-// Event Listeners
+// TAB 2: Accounts Form Loading & Saving
+async function loadAccountsForm() {
+  if (!state.data) return;
+  const b = state.data.business;
+  const split = state.data.accounts_split || {};
+  $("#inpCbe").value = split.cbe || "";
+  $("#inpTelebirr").value = split.telebirr || "";
+  $("#inpNames").value = b.names || "";
+  $("#inpCode").value = b.code || "";
+}
+
+$("#formAccounts").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const body = {
+      cbe: $("#inpCbe").value.trim(),
+      telebirr: $("#inpTelebirr").value.trim(),
+      names: $("#inpNames").value.trim(),
+      code: $("#inpCode").value.trim(),
+    };
+    const res = await api(`api/business/${state.activeBizId}/settings`, "PUT", body);
+    haptic("success");
+    alertMsg("✅ Payment accounts & fraud rules saved successfully!");
+    await loadReport();
+  } catch (err) {
+    alertMsg(err.message);
+  }
+});
+
+// TAB 3: Waiters Management
+async function loadWaitersTab() {
+  try {
+    const res = await api(`api/business/${state.activeBizId}/waiters`);
+    const waiters = res.waiters || [];
+    const pending = waiters.filter((w) => !w.active);
+    const active = waiters.filter((w) => w.active);
+
+    // Pending Section
+    const pCard = $("#pendingWaitersCard");
+    if (pending.length) {
+      pCard.style.display = "block";
+      $("#pendingWaitersList").innerHTML = pending.map((w) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--bg2);">
+          <div>
+            <strong>${esc(w.counter_name || w.user_name)}</strong> (ID: <code>${w.tg_id}</code>)
+            <div style="font-size:11.5px; color:var(--hint);">Requested: ${esc(w.joined_at?.slice(0, 10))}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="small ok" data-waiter-act="approve" data-wid="${w.tg_id}">Approve</button>
+            <button class="small bad" data-waiter-act="delete" data-wid="${w.tg_id}">Decline</button>
+          </div>
+        </div>
+      `).join("");
+    } else {
+      pCard.style.display = "none";
+    }
+
+    // Active Section
+    if (active.length) {
+      $("#registeredWaitersList").innerHTML = active.map((w) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid var(--bg2);">
+          <div>
+            <span style="color:var(--ok)">●</span> <strong>${esc(w.counter_name || w.user_name)}</strong>
+            <div style="font-size:11.5px; color:var(--hint);">ID: <code>${w.tg_id}</code>${w.username ? ` · @${esc(w.username)}` : ""}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="small warn" data-waiter-act="deactivate" data-wid="${w.tg_id}">Deactivate</button>
+            <button class="small ghost" data-waiter-act="delete" data-wid="${w.tg_id}">Remove</button>
+          </div>
+        </div>
+      `).join("");
+    } else {
+      $("#registeredWaitersList").innerHTML = `<div class="empty">No registered cashiers yet. Add one above!</div>`;
+    }
+  } catch (err) {
+    $("#registeredWaitersList").innerHTML = `<div class="empty" style="color:var(--bad);">${esc(err.message)}</div>`;
+  }
+}
+
+$("#formAddWaiter").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const inpId = $("#inpWaiterId").value.trim();
+  const inpName = $("#inpCounterName").value.trim();
+  try {
+    await api(`api/business/${state.activeBizId}/waiters`, "POST", { tg_id: inpId, counter_name: inpName });
+    haptic("success");
+    alertMsg("✅ Cashier registered successfully!");
+    $("#inpWaiterId").value = "";
+    $("#inpCounterName").value = "";
+    await loadWaitersTab();
+  } catch (err) {
+    alertMsg(err.message);
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-waiter-act]");
+  if (!btn) return;
+  const act = btn.dataset.waiterAct;
+  const wid = btn.dataset.wid;
+  try {
+    btn.disabled = true;
+    if (act === "approve") {
+      await api(`api/business/${state.activeBizId}/waiters/${wid}`, "PATCH", { active: true });
+      haptic("success");
+    } else if (act === "deactivate") {
+      await api(`api/business/${state.activeBizId}/waiters/${wid}`, "PATCH", { active: false });
+      haptic("warning");
+    } else if (act === "delete") {
+      if (!await confirmMsg("Remove this cashier?")) { btn.disabled = false; return; }
+      await api(`api/business/${state.activeBizId}/waiters/${wid}`, "DELETE");
+      haptic("warning");
+    }
+    await loadWaitersTab();
+  } catch (err) {
+    alertMsg(err.message);
+    btn.disabled = false;
+  }
+});
+
+// TAB 4: Super Admin All Stores
+async function loadAllStores() {
+  try {
+    const res = await api("api/businesses");
+    const list = res.businesses || [];
+    $("#allStoresList").innerHTML = list.length ? list.map((b) => `
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid var(--bg2);">
+        <div>
+          <strong>#${b.id} ${esc(b.name)}</strong>
+          <div style="font-size:11.5px; color:var(--hint);">Code: <code>${esc(b.code)}</code> · Currency: ${esc(b.currency)}</div>
+        </div>
+        <button class="small ghost" data-select-biz="${b.id}">Manage</button>
+      </div>
+    `).join("") : `<div class="empty">No businesses registered yet.</div>`;
+  } catch (err) {
+    $("#allStoresList").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+  }
+}
+
+$("#formNewBusiness").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const body = {
+      name: $("#inpNewBizName").value.trim(),
+      owner_id: $("#inpNewBizOwner").value.trim(),
+      code: $("#inpNewBizCode").value.trim(),
+      cbe: $("#inpNewBizCbe").value.trim(),
+      telebirr: $("#inpNewBizTb").value.trim(),
+    };
+    const res = await api("api/businesses", "POST", body);
+    haptic("success");
+    alertMsg(`✅ Store '${res.business.name}' created successfully!`);
+    $("#inpNewBizName").value = "";
+    $("#inpNewBizOwner").value = "";
+    $("#inpNewBizCode").value = "";
+    $("#inpNewBizCbe").value = "";
+    $("#inpNewBizTb").value = "";
+    await loadAllStores();
+  } catch (err) {
+    alertMsg(err.message);
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-select-biz]");
+  if (!btn) return;
+  const bid = Number(btn.dataset.selectBiz);
+  state.activeBizId = bid;
+  $("#bizSelect").value = bid;
+  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
+  $("[data-tab='tabSales']").classList.add("active");
+  document.querySelectorAll(".tab-pane").forEach((p) => p.style.display = "none");
+  $("#tabSales").style.display = "block";
+  await loadReport();
+  if (state.me && (state.me.is_superadmin || state.me.role === "owner")) {
+    await loadAccountsForm();
+    await loadWaitersTab();
+  }
+});
+
+// Main Tab Navigation
+document.querySelectorAll(".nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const target = btn.dataset.tab;
+    document.querySelectorAll(".tab-pane").forEach((p) => p.style.display = "none");
+    $(`#${target}`).style.display = "block";
+  });
+});
+
+// Period Tabs & Selectors
+document.querySelectorAll(".period-tab").forEach((tab) => {
+  tab.addEventListener("click", async () => {
+    document.querySelectorAll(".period-tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    state.periodType = tab.dataset.period;
+    state.periodValue = "";
+    await loadReport();
+  });
+});
+
+$("#bizSelect").addEventListener("change", async (e) => {
+  state.activeBizId = Number(e.target.value);
+  await loadReport();
+  if (state.me && (state.me.is_superadmin || state.me.role === "owner")) {
+    await loadAccountsForm();
+    await loadWaitersTab();
+  }
+});
+
+$("#periodValSelect").addEventListener("change", async (e) => {
+  state.periodValue = e.target.value;
+  await loadReport();
+});
+
+$("#chips").addEventListener("click", (e) => {
+  const c = e.target.closest("[data-filter]");
+  if (c) { state.filter = c.dataset.filter; render(); }
+});
+$("#search").addEventListener("input", (e) => { state.q = e.target.value.trim(); render(); });
+$("#refresh").addEventListener("click", async () => {
+  await loadReport();
+  await loadWaitersTab();
+});
+$("#viewer").addEventListener("click", () => { $("#viewer").style.display = "none"; });
+
+// Bank Total Save
+$("#saveBank").addEventListener("click", async () => {
+  try {
+    const s = await api(`api/day/${state.periodValue}/bank?business_id=${state.activeBizId}`, "PUT", {bank_total: $("#bank").value});
+    state.data.summary = s; render(); haptic("success");
+  } catch (err) { alertMsg(err.message); }
+});
+
+// Verify All Pending
+$("#verifyAll").addEventListener("click", async () => {
+  if (!await confirmMsg("Mark all clean pending entries as verified?")) return;
+  try {
+    const r = await api(`api/day/${state.periodValue}/verify-all?business_id=${state.activeBizId}`, "POST");
+    haptic("success");
+    alertMsg(`${r.updated} entries verified`);
+    await loadReport();
+  } catch (err) { alertMsg(err.message); }
+});
+
+// Download PDF
+$("#btnPdf").addEventListener("click", () => {
+  const query = new URLSearchParams({
+    business_id: state.activeBizId,
+    period_type: state.periodType,
+    period_value: state.periodValue,
+    auth: AUTH
+  });
+  const url = `api/pdf?${query.toString()}`;
+  if (tg) {
+    tg.openLink(window.location.origin + "/" + url);
+  } else {
+    window.location.href = url;
+  }
+});
+
+// Export CSV
+$("#export").addEventListener("click", async () => {
+  try {
+    await api(`api/day/${state.periodValue}/export?business_id=${state.activeBizId}`, "POST");
+    alertMsg("CSV spreadsheet sent to your Telegram chat.");
+  } catch (err) { alertMsg(err.message); }
+});
+
+// Ledger Actions
 $("#list").addEventListener("click", async (e) => {
   const photo = e.target.closest("[data-photo]");
   if (photo) { $("#viewer img").src = photo.src; $("#viewer").style.display = "flex"; return; }
@@ -426,79 +921,6 @@ $("#list").addEventListener("click", async (e) => {
     }
     await loadReport();
   } catch (err) { alertMsg(err.message); btn.disabled = false; }
-});
-
-// Period Tabs
-document.querySelectorAll(".period-tab").forEach((tab) => {
-  tab.addEventListener("click", async () => {
-    document.querySelectorAll(".period-tab").forEach((t) => t.classList.remove("active"));
-    tab.classList.add("active");
-    state.periodType = tab.dataset.period;
-    state.periodValue = ""; // will reset to current
-    await loadReport();
-  });
-});
-
-// Selects
-$("#bizSelect").addEventListener("change", async (e) => {
-  state.activeBizId = Number(e.target.value);
-  await loadReport();
-});
-$("#periodValSelect").addEventListener("change", async (e) => {
-  state.periodValue = e.target.value;
-  await loadReport();
-});
-
-// Filter & Search
-$("#chips").addEventListener("click", (e) => {
-  const c = e.target.closest("[data-filter]");
-  if (c) { state.filter = c.dataset.filter; render(); }
-});
-$("#search").addEventListener("input", (e) => { state.q = e.target.value.trim(); render(); });
-$("#refresh").addEventListener("click", loadReport);
-$("#viewer").addEventListener("click", () => { $("#viewer").style.display = "none"; });
-
-// Bank Statement Save
-$("#saveBank").addEventListener("click", async () => {
-  try {
-    const s = await api(`api/day/${state.periodValue}/bank?business_id=${state.activeBizId}`, "PUT", {bank_total: $("#bank").value});
-    state.data.summary = s; render(); haptic("success");
-  } catch (err) { alertMsg(err.message); }
-});
-
-// Verify All
-$("#verifyAll").addEventListener("click", async () => {
-  if (!await confirmMsg("Mark all clean pending entries as verified?")) return;
-  try {
-    const r = await api(`api/day/${state.periodValue}/verify-all?business_id=${state.activeBizId}`, "POST");
-    haptic("success");
-    alertMsg(`${r.updated} entries verified`);
-    await loadReport();
-  } catch (err) { alertMsg(err.message); }
-});
-
-// Download PDF
-$("#btnPdf").addEventListener("click", () => {
-  const query = new URLSearchParams({
-    business_id: state.activeBizId,
-    period_type: state.periodType,
-    period_value: state.periodValue,
-    auth: AUTH
-  });
-  const url = `api/pdf?${query.toString()}`;
-  if (tg) {
-    tg.openLink(window.location.origin + "/" + url);
-  } else {
-    window.location.href = url;
-  }
-});
-
-// CSV Export
-$("#export").addEventListener("click", async () => {
-  try {
-    await api(`api/day/${state.periodValue}/export?business_id=${state.activeBizId}`, "POST");
-    alertMsg("CSV spreadsheet sent to your Telegram chat.");
-  } catch (err) { alertMsg(err.message); }
 });
 
 init();
