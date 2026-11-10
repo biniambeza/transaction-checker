@@ -599,7 +599,10 @@ async def on_switch_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
 async def cmd_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     u, msg = update.effective_user, update.effective_message
     if not can_submit(u.id):
-        await msg.reply_html("You're not registered. Ask your store owner to register you with <code>/addwaiter</code>.")
+        await msg.reply_html(
+            "You are not registered. Tap below to join your store using their Join Code or register your business:",
+            reply_markup=dashboard_markup()
+        )
         return
     if not ctx.args:
         await msg.reply_html("Usage: <code>/name Counter 1</code> or <code>/name Counter 2 - Meron</code>")
@@ -624,7 +627,8 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.reply_html(
             f"🔒 <b>You are not an authorized cashier.</b>\n\n"
             f"Your Telegram ID is: <code>{u.id}</code>\n"
-            f"Ask your store owner to register you using:\n<code>/addwaiter {u.id} [Counter Name]</code>"
+            f"Tap below to open the portal and join your store using their Join Code, or request to register as a Business Owner:",
+            reply_markup=dashboard_markup()
         )
         return
 
@@ -643,7 +647,8 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             ctx.bot, biz_id,
             f"⚠️ <b>WARNING for {H(biz['name'])}:</b> Cashier {H(u.full_name)} submitted a payment, "
             f"but you have NOT set your CBE or telebirr payment accounts yet!\n"
-            f"Use <code>/setaccounts &lt;CBE&gt;, &lt;telebirr&gt;</code> immediately so payments can be verified!"
+            f"Please open your WebApp Dashboard -> ⚙️ Store Settings to set your accounts so payments can be verified!",
+            markup=dashboard_markup()
         )
 
     tg_file = await (msg.photo[-1].get_file() if msg.photo else msg.document.get_file())
@@ -757,7 +762,8 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.reply_html(
             f"🔒 <b>You are not an authorized cashier.</b>\n\n"
             f"Your Telegram ID is: <code>{u.id}</code>\n"
-            f"Ask your store owner to register you using:\n<code>/addwaiter {u.id} [Counter Name]</code>"
+            f"Tap below to open the portal and join your store using their Join Code, or request to register as a Business Owner:",
+            reply_markup=dashboard_markup()
         )
         return
 
