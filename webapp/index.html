@@ -25,10 +25,11 @@
   .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; flex-wrap: wrap; }
   .header-biz { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px; }
   .header-biz h1 { margin: 0; font-size: 18px; font-weight: 700; }
-  .badge-role { font-size: 11px; padding: 2px 7px; border-radius: 6px; font-weight: 600; text-transform: uppercase; }
+  .badge-role { font-size: 11px; padding: 3px 8px; border-radius: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
   .role-superadmin { background: #6c5ce7; color: #fff; }
   .role-owner { background: var(--btn); color: #fff; }
-  .role-waiter { background: var(--hint); color: #fff; }
+  .role-waiter { background: #00b894; color: #fff; }
+  .role-guest { background: var(--hint); color: #fff; }
 
   /* Navigation Tabs */
   .main-nav { display: flex; background: var(--bg); border-radius: 12px; padding: 4px; gap: 4px; margin-bottom: 14px;
@@ -64,6 +65,7 @@
   .notice-box { background: color-mix(in srgb, var(--link) 10%, var(--bg)); border-left: 4px solid var(--link);
                 border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; }
   .notice-box.warn { background: color-mix(in srgb, var(--warn) 10%, var(--bg)); border-left-color: var(--warn); }
+  .notice-box.ok { background: color-mix(in srgb, var(--ok) 10%, var(--bg)); border-left-color: var(--ok); }
 
   /* Period Tabs */
   .period-tabs { display: flex; background: var(--bg2); padding: 3px; border-radius: 10px; gap: 4px; margin-bottom: 10px; }
@@ -126,11 +128,11 @@
   <div id="msg">Loading…</div>
   <div id="app" hidden>
     
-    <!-- Top Bar with Store Selection and Role Badge -->
+    <!-- Top Bar with Role & Store Context -->
     <div class="header-bar">
       <div class="header-biz">
-        <h1 id="bizTitle">Store</h1>
-        <span class="badge-role" id="roleBadge">Owner</span>
+        <h1 id="bizTitle">Dashboard</h1>
+        <span class="badge-role" id="roleBadge">Role</span>
       </div>
       <div style="display:flex; gap:6px; align-items:center;">
         <select id="bizSelect" style="display:none;"></select>
@@ -138,15 +140,93 @@
       </div>
     </div>
 
-    <!-- Main Navigation Tabs -->
-    <nav class="main-nav">
-      <button class="nav-btn active" data-tab="tabSales">📊 Sales & Reports</button>
-      <button class="nav-btn" data-tab="tabAccounts" id="navAccounts">🏦 Accounts Setup</button>
-      <button class="nav-btn" data-tab="tabWaiters" id="navWaiters">👥 Cashiers</button>
-      <button class="nav-btn" data-tab="tabAdmin" id="navAdmin" style="display:none;">⚡ Super Admin</button>
+    <!-- Navigation Tabs for BOT OWNER (Super Admin) -->
+    <nav class="main-nav" id="navBotOwner" style="display:none;">
+      <button class="nav-btn active" data-tab="tabBotStores">🏢 Client Businesses & Owners</button>
+      <button class="nav-btn" data-tab="tabBotOnboard">➕ Onboard Business Owner</button>
+      <button class="nav-btn" data-tab="tabSales" id="navBotSales">📊 Store Sales Ledger</button>
     </nav>
 
-    <!-- TAB 1: Sales & Reports -->
+    <!-- Navigation Tabs for BUSINESS OWNER -->
+    <nav class="main-nav" id="navStoreOwner" style="display:none;">
+      <button class="nav-btn active" data-tab="tabSales">📊 Sales & Transactions</button>
+      <button class="nav-btn" data-tab="tabAccounts">🏦 Accounts Setup</button>
+      <button class="nav-btn" data-tab="tabWaiters">👥 Cashiers (Owner Only)</button>
+    </nav>
+
+    <!-- Banner for CASHIERS (Waiters) -->
+    <div id="cashierBanner" class="notice-box ok" style="display:none; margin-bottom:12px;">
+      📸 <b>Cashier Mode:</b> Send customer payment photos / screenshots directly to <b>@kifiya_checker_bot</b> in Telegram. The bot verifies the receipt and alerts your store owner immediately.
+    </div>
+
+    <!-- ==================== TIER 1: BOT OWNER TABS ==================== -->
+    <!-- Tab: Registered Businesses & Owners List -->
+    <div id="tabBotStores" class="tab-pane" style="display:none;">
+      <!-- Platform Stats Cards -->
+      <section class="card" id="platformStatsCard">
+        <h2>⚡ Platform Overview</h2>
+        <div class="stats" id="platformStats"></div>
+      </section>
+
+      <section class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h2 style="margin:0;">Registered Business Clients & Owners</h2>
+          <button class="small ok" id="btnGoOnboard">➕ Add New Business</button>
+        </div>
+        <div class="notice-box">
+          👑 <b>Bot Owner Role:</b> You control the platform. You register, update, and remove business owners. Only the business owners manage their own cashiers.
+        </div>
+        <div id="allStoresList">Loading businesses…</div>
+      </section>
+    </div>
+
+    <!-- Tab: Onboard Business Owner -->
+    <div id="tabBotOnboard" class="tab-pane" style="display:none;">
+      <section class="card">
+        <h2>🏢 Register & Onboard Business Owner</h2>
+        <div class="notice-box">
+          👑 <b>Register New Client:</b> Enter the cafe or supermarket details and assign their Telegram ID. They will immediately receive access to their Business Owner dashboard.
+        </div>
+
+        <form id="formNewBusiness">
+          <div class="form-group">
+            <label>Business / Store Name</label>
+            <input type="text" id="inpNewBizName" placeholder="e.g. Friendship Supermarket" required>
+          </div>
+
+          <div class="form-group">
+            <label>Owner Telegram ID or @Username</label>
+            <input type="text" id="inpNewBizOwner" placeholder="e.g. 987654321 or @client_owner" required>
+            <div class="form-help">Ask the client to send /start to @kifiya_checker_bot to see their Telegram ID.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Cashier Join Code (optional)</label>
+            <input type="text" id="inpNewBizCode" placeholder="e.g. friendship">
+            <div class="form-help">Short code used by their cashiers when requesting to join.</div>
+          </div>
+
+          <div class="form-group">
+            <label>Store CBE Account (optional)</label>
+            <input type="text" id="inpNewBizCbe" placeholder="e.g. 1000123456076">
+          </div>
+
+          <div class="form-group">
+            <label>Store telebirr (optional)</label>
+            <input type="text" id="inpNewBizTb" placeholder="e.g. 0911223344">
+          </div>
+
+          <div class="form-group">
+            <label>Store Legal Names (optional)</label>
+            <input type="text" id="inpNewBizNames" placeholder="e.g. Friendship Supermarket PLC">
+          </div>
+
+          <button type="submit" class="ok" style="width:100%; padding:11px;">🏢 Register & Onboard Store Owner</button>
+        </form>
+      </section>
+    </div>
+
+    <!-- ==================== TIER 2 & 3: SALES & TRANSACTIONS ==================== -->
     <div id="tabSales" class="tab-pane">
       <div class="bar">
         <select id="periodValSelect"></select>
@@ -166,8 +246,8 @@
         <div class="stats" id="stats"></div>
       </section>
 
-      <!-- Bank Statement Reconciliation (Daily only) -->
-      <section class="card" id="bankCheckSection">
+      <!-- Bank Statement Reconciliation (Owner only, Daily only) -->
+      <section class="card" id="bankCheckSection" style="display:none;">
         <h2>Reconcile with Bank Statement</h2>
         <div class="row">
           <input id="bank" type="number" inputmode="decimal" step="0.01" placeholder="Bank statement closing total">
@@ -176,22 +256,22 @@
         <div class="diff" id="diff"></div>
       </section>
 
-      <!-- Sales by Cashier / Waiter -->
-      <section class="card">
-        <h2>Sales by Cashier / Waiter</h2>
+      <!-- Sales by Cashier (Owner only) -->
+      <section class="card" id="secWaitersBreakdown" style="display:none;">
+        <h2>Sales by Cashier / Counter</h2>
         <table><thead><tr><th>Cashier / Counter</th><th class="n">Tx</th><th class="n">Total</th><th class="n">Verified</th></tr></thead>
           <tbody id="waiters"></tbody></table>
       </section>
 
-      <!-- Top Paying Customers -->
-      <section class="card">
+      <!-- Top Paying Customers (Owner only) -->
+      <section class="card" id="secCustomersBreakdown" style="display:none;">
         <h2>Top Paying Customers</h2>
         <table><thead><tr><th>Customer (Payer)</th><th class="n">Payments</th><th class="n">Total Spent</th></tr></thead>
           <tbody id="customers"></tbody></table>
       </section>
 
-      <!-- Sales by Payment System / Bank -->
-      <section class="card">
+      <!-- Sales by Payment System (Owner only) -->
+      <section class="card" id="secBanksBreakdown" style="display:none;">
         <h2>By Payment System / Bank</h2>
         <table><thead><tr><th>Bank / System</th><th class="n">Sales</th><th class="n">Total Amount</th></tr></thead>
           <tbody id="banks"></tbody></table>
@@ -200,8 +280,8 @@
       <!-- Transactions Ledger -->
       <section class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
-          <h2 style="margin:0">Transactions Ledger</h2>
-          <button class="small ok" id="verifyAll">Verify clean pending</button>
+          <h2 style="margin:0" id="ledgerTitle">Transactions Ledger</h2>
+          <button class="small ok" id="verifyAll" style="display:none;">Verify clean pending</button>
         </div>
         <input id="search" type="search" placeholder="Search customer, cashier, code, bank, amount…" style="width:100%;margin-bottom:8px">
         <div class="chips" id="chips"></div>
@@ -209,7 +289,8 @@
       </section>
     </div>
 
-    <!-- TAB 2: Payment Accounts & Anti-Fake Setup -->
+    <!-- ==================== TIER 2: BUSINESS OWNER TABS ==================== -->
+    <!-- Tab: Payment Accounts & Anti-Fake Setup -->
     <div id="tabAccounts" class="tab-pane" style="display:none;">
       <section class="card">
         <h2>🏦 Store Payment Receiving Accounts</h2>
@@ -247,12 +328,12 @@
       </section>
     </div>
 
-    <!-- TAB 3: Cashiers & Waiters Management -->
+    <!-- Tab: Cashiers Management (EXCLUSIVE TO STORE OWNER) -->
     <div id="tabWaiters" class="tab-pane" style="display:none;">
       <section class="card">
         <h2>➕ Register a New Cashier / Waiter</h2>
         <div class="notice-box">
-          🔒 <b>Owner-Controlled Access:</b> Only cashiers registered or approved by you can submit transactions for this store.
+          🔒 <b>Business Owner Control:</b> Only you, the store owner, can add, update, and remove cashiers for this store.
         </div>
 
         <form id="formAddWaiter">
@@ -282,51 +363,6 @@
       <section class="card">
         <h2>Registered Cashiers</h2>
         <div id="registeredWaitersList">Loading cashiers…</div>
-      </section>
-    </div>
-
-    <!-- TAB 4: Platform Super Admin (Only visible to You) -->
-    <div id="tabAdmin" class="tab-pane" style="display:none;">
-      <section class="card">
-        <h2>🏢 Onboard a New Business Client</h2>
-        <div class="notice-box">
-          👑 <b>Platform Super Admin:</b> Register a new cafe or supermarket client here. They will immediately receive access as the Business Owner.
-        </div>
-
-        <form id="formNewBusiness">
-          <div class="form-group">
-            <label>Business / Store Name</label>
-            <input type="text" id="inpNewBizName" placeholder="e.g. Friendship Supermarket" required>
-          </div>
-
-          <div class="form-group">
-            <label>Owner Telegram ID or @Username</label>
-            <input type="text" id="inpNewBizOwner" placeholder="e.g. 987654321 or @client_owner">
-            <div class="form-help">The client's Telegram ID. They will be assigned as the store owner.</div>
-          </div>
-
-          <div class="form-group">
-            <label>Cashier Join Code (optional)</label>
-            <input type="text" id="inpNewBizCode" placeholder="e.g. friendship">
-          </div>
-
-          <div class="form-group">
-            <label>Store CBE Account (optional)</label>
-            <input type="text" id="inpNewBizCbe" placeholder="e.g. 1000123456076">
-          </div>
-
-          <div class="form-group">
-            <label>Store telebirr (optional)</label>
-            <input type="text" id="inpNewBizTb" placeholder="e.g. 0911223344">
-          </div>
-
-          <button type="submit" class="ok" style="width:100%; padding:11px;">🏢 Register & Onboard Store</button>
-        </form>
-      </section>
-
-      <section class="card">
-        <h2>All Platform Stores</h2>
-        <div id="allStoresList">Loading stores…</div>
       </section>
     </div>
 
@@ -394,23 +430,14 @@ async function init() {
     const me = await api("api/me");
     state.me = me;
 
-    // Set role badge
     const roleBadge = $("#roleBadge");
     roleBadge.className = "badge-role role-" + me.role;
     roleBadge.textContent = me.role === "superadmin" ? "Platform Owner 👑" :
-                           (me.role === "owner" ? "Store Owner 🏢" : "Cashier 🛒");
+                           (me.role === "owner" ? "Store Owner 🏢" : (me.role === "waiter" ? "Cashier 🛒" : "Guest"));
 
-    if (me.is_superadmin) {
-      $("#navAdmin").style.display = "inline-block";
-    }
-
-    if (!me.is_superadmin && me.role !== "owner") {
-      $("#navAccounts").style.display = "none";
-      $("#navWaiters").style.display = "none";
-    }
-
+    // If User has no businesses or roles yet -> GUEST VIEW
     const stores = me.owned_businesses.length ? me.owned_businesses : me.waiter_businesses;
-    if (!stores.length) {
+    if (!stores.length && !me.is_superadmin) {
       $("#msg").innerHTML = `
         <div class="card" style="text-align:center; padding: 24px 16px;">
           <h2 style="font-size:16px; margin-bottom:8px; color:var(--text);">👋 Welcome to Transaction Checker</h2>
@@ -449,8 +476,9 @@ async function init() {
       return;
     }
 
-    state.activeBizId = me.active_business_id || stores[0].id;
+    state.activeBizId = me.active_business_id || (stores.length ? stores[0].id : 1);
 
+    // Populate business switcher if multiple
     if (stores.length > 1 || me.is_superadmin) {
       const bSel = $("#bizSelect");
       bSel.style.display = "inline-block";
@@ -458,21 +486,129 @@ async function init() {
       bSel.value = state.activeBizId;
     }
 
-    $("#msg").hidden = true;
-    $("#app").hidden = false;
-
-    // Load initial data
-    await loadReport();
-    if (me.is_superadmin || me.role === "owner") {
+    // Role-based Nav & View Setup
+    if (me.is_superadmin) {
+      // 1. BOT OWNER TIER
+      $("#navBotOwner").style.display = "flex";
+      $("#bizTitle").textContent = "Platform Control";
+      switchTab("tabBotStores");
+      await loadAllStores();
+      await loadPlatformStats();
+    } else if (me.role === "owner") {
+      // 2. BUSINESS OWNER TIER
+      $("#navStoreOwner").style.display = "flex";
+      $("#verifyAll").style.display = "inline-block";
+      $("#secWaitersBreakdown").style.display = "block";
+      $("#secCustomersBreakdown").style.display = "block";
+      $("#secBanksBreakdown").style.display = "block";
+      switchTab("tabSales");
+      await loadReport();
       await loadAccountsForm();
       await loadWaitersTab();
+    } else {
+      // 3. CASHIER TIER
+      $("#cashierBanner").style.display = "block";
+      $("#btnPdf").style.display = "none";
+      $("#export").style.display = "none";
+      $("#ledgerTitle").textContent = "My Submitted Transactions";
+      switchTab("tabSales");
+      await loadReport();
     }
-    if (me.is_superadmin) await loadAllStores();
+
+    $("#msg").hidden = true;
+    $("#app").hidden = false;
   } catch (e) {
     $("#msg").textContent = e.message;
   }
 }
 
+function switchTab(targetId) {
+  document.querySelectorAll(".tab-pane").forEach((p) => p.style.display = "none");
+  const target = $(`#${targetId}`);
+  if (target) target.style.display = "block";
+  document.querySelectorAll(".nav-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === targetId);
+  });
+}
+
+// -------------------- BOT OWNER FUNCTIONS --------------------
+async function loadPlatformStats() {
+  try {
+    const s = await api("api/platform/stats");
+    $("#platformStats").innerHTML = `
+      <div class="stat"><div class="v">${s.total_businesses}</div><div class="l">🏢 Total Stores</div></div>
+      <div class="stat"><div class="v" style="color:var(--ok)">${s.active_businesses}</div><div class="l">🟢 Active Stores</div></div>
+      <div class="stat"><div class="v">${s.total_cashiers}</div><div class="l">👥 Active Cashiers</div></div>
+      <div class="stat"><div class="v" style="color:var(--ok)">${money(s.total_verified_amount)}</div><div class="l">💰 Verified Sales (${s.total_verified_tx} tx)</div></div>
+    `;
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function loadAllStores() {
+  try {
+    const res = await api("api/businesses");
+    const list = res.businesses || [];
+    $("#allStoresList").innerHTML = list.length ? list.map((b) => {
+      const owner = b.owners && b.owners[0];
+      const ownerText = owner ?
+        `<strong>${esc(owner.name)}</strong> (ID: <code>${owner.tg_id}</code>${owner.username ? ` · @${esc(owner.username)}` : ""})` :
+        `<span style="color:var(--warn)">⚠️ No Owner Assigned</span>`;
+      const curOwnerId = owner ? owner.tg_id : "";
+
+      return `
+        <div class="card" style="margin-bottom:12px; border:1px solid var(--bg2);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; font-weight:700;">${esc(b.name)} <span style="font-size:12px; font-weight:normal; color:var(--hint);">#${b.id}</span></h3>
+              <div style="font-size:12px; color:var(--hint); margin-top:2px;">
+                Code: <code>${esc(b.code)}</code> · Cashiers: <b>${b.waiters_count}</b> · Volume: <b>${money(b.payments_total)}</b> (${b.payments_count} tx)
+              </div>
+            </div>
+            <span class="badge ${b.active ? "b-verified" : "b-rejected"}">${b.active ? "ACTIVE" : "INACTIVE"}</span>
+          </div>
+
+          <div style="background:var(--bg2); padding:8px 10px; border-radius:8px; font-size:12.5px; margin-bottom:10px;">
+            <b>Assigned Owner:</b> ${ownerText}
+          </div>
+
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="small ghost" data-store-act="view" data-bid="${b.id}">👁️ View Sales Ledger</button>
+            <button class="small ghost" data-store-act="edit" data-bid="${b.id}">✏️ Edit / Change Owner</button>
+            <button class="small ${b.active ? "warn" : "ok"}" data-store-act="toggle" data-bid="${b.id}" data-active="${b.active}">
+              ${b.active ? "Deactivate" : "Activate"}
+            </button>
+          </div>
+
+          <!-- Inline Edit Form -->
+          <div id="editBizForm_${b.id}" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid var(--bg2);">
+            <div class="form-group">
+              <label>Store Name</label>
+              <input type="text" id="editName_${b.id}" value="${esc(b.name)}">
+            </div>
+            <div class="form-group">
+              <label>Store Join Code</label>
+              <input type="text" id="editCode_${b.id}" value="${esc(b.code)}">
+            </div>
+            <div class="form-group">
+              <label>Assign Owner (Telegram ID or @Username)</label>
+              <input type="text" id="editOwner_${b.id}" value="${curOwnerId}" placeholder="e.g. 987654321 or @client_owner">
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="small ok" data-store-act="save" data-bid="${b.id}">💾 Save Changes</button>
+              <button class="small ghost" data-store-act="cancel" data-bid="${b.id}">Cancel</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("") : `<div class="empty">No businesses registered yet. Use the tab above to onboard your first client!</div>`;
+  } catch (err) {
+    $("#allStoresList").innerHTML = `<div class="empty" style="color:var(--bad)">${esc(err.message)}</div>`;
+  }
+}
+
+// -------------------- SALES & REPORTS --------------------
 async function loadReport() {
   try {
     const query = new URLSearchParams({
@@ -485,9 +621,14 @@ async function loadReport() {
     state.periodValue = d.period_value;
     CURRENCY = d.currency || "ETB";
 
-    $("#bizTitle").textContent = d.business.name;
+    if (state.me.role !== "superadmin") {
+      $("#bizTitle").textContent = d.business.name;
+    }
     populatePeriodOptions(d.recent_periods, d.period_type, d.period_value);
-    $("#bankCheckSection").style.display = (state.periodType === "day") ? "block" : "none";
+    
+    // Bank check is for store owner only in daily view
+    const isOwner = state.me && (state.me.is_superadmin || state.me.role === "owner");
+    $("#bankCheckSection").style.display = (isOwner && state.periodType === "day") ? "block" : "none";
 
     render();
   } catch (err) {
@@ -523,21 +664,34 @@ function populatePeriodOptions(recents, type, currentVal) {
 
 function render() {
   const { summary: s, payments, period_type, period_value } = state.data;
+  const isWaiter = state.me && state.me.role === "waiter";
   const pLabel = period_type === "year" ? `Year ${period_value}` :
                  (period_type === "month" ? `Month ${period_value}` : period_value);
-  $("#kpiHeading").textContent = `Sales Summary — ${pLabel}`;
+  
+  $("#kpiHeading").textContent = isWaiter ? `My Sales Summary — ${pLabel}` : `Sales Summary — ${pLabel}`;
 
-  $("#stats").innerHTML = `
-    <div class="stat big"><div class="v">${money(s.claimed.total)}</div><div class="l">Claimed total · ${s.claimed.count} sales</div></div>
-    <div class="stat"><div class="v" style="color:var(--ok)">${money(s.verified.total)}</div><div class="l">✅ Verified real · ${s.verified.count}</div></div>
-    <div class="stat"><div class="v">${money(s.pending.total)}</div><div class="l">⏳ Pending review · ${s.pending.count}</div></div>
-    <div class="stat"><div class="v" style="color:var(--bad)">${money(s.rejected.total)}</div><div class="l">❌ Rejected · ${s.rejected.count}</div></div>
-    <div class="stat"><div class="v" style="color:var(--warn)">${s.duplicates.count}</div><div class="l">⚠️ Duplicate attempts</div></div>
-    <div class="stat"><div class="v">${money(s.bank_confirmed.total)}</div><div class="l">🏦 Bank confirmed · ${s.bank_confirmed.count}</div></div>
-    <div class="stat"><div class="v" style="color:var(--bad)">${s.problems.count}</div><div class="l">🚩 Problems flagged</div></div>
-    ${s.missing_amount || s.missing_ref ? `<div class="stat big"><div class="l" style="color:var(--warn)">❓ ${s.missing_amount} without amount · ${s.missing_ref} without code</div></div>` : ""}`;
+  if (isWaiter) {
+    // CASHIER TIER: Only show cashier's own numbers!
+    $("#stats").innerHTML = `
+      <div class="stat big"><div class="v" style="color:var(--ok)">${money(s.verified.total)}</div><div class="l">✅ My Verified Sales · ${s.verified.count}</div></div>
+      <div class="stat"><div class="v">${money(s.pending.total)}</div><div class="l">⏳ Pending · ${s.pending.count}</div></div>
+      <div class="stat"><div class="v">${s.claimed.count}</div><div class="l">🔢 My Total Transactions</div></div>
+    `;
+  } else {
+    // BUSINESS OWNER / SUPERADMIN TIER: Full store breakdown
+    $("#stats").innerHTML = `
+      <div class="stat big"><div class="v">${money(s.claimed.total)}</div><div class="l">Claimed total · ${s.claimed.count} sales</div></div>
+      <div class="stat"><div class="v" style="color:var(--ok)">${money(s.verified.total)}</div><div class="l">✅ Verified real · ${s.verified.count}</div></div>
+      <div class="stat"><div class="v">${money(s.pending.total)}</div><div class="l">⏳ Pending review · ${s.pending.count}</div></div>
+      <div class="stat"><div class="v" style="color:var(--bad)">${money(s.rejected.total)}</div><div class="l">❌ Rejected · ${s.rejected.count}</div></div>
+      <div class="stat"><div class="v" style="color:var(--warn)">${s.duplicates.count}</div><div class="l">⚠️ Duplicate attempts</div></div>
+      <div class="stat"><div class="v">${money(s.bank_confirmed.total)}</div><div class="l">🏦 Bank confirmed · ${s.bank_confirmed.count}</div></div>
+      <div class="stat"><div class="v" style="color:var(--bad)">${s.problems.count}</div><div class="l">🚩 Problems flagged</div></div>
+      ${s.missing_amount || s.missing_ref ? `<div class="stat big"><div class="l" style="color:var(--warn)">❓ ${s.missing_amount} without amount · ${s.missing_ref} without code</div></div>` : ""}`;
+  }
 
-  if (period_type === "day") {
+  // Reconciliation for owner
+  if (!isWaiter && period_type === "day") {
     if (document.activeElement !== $("#bank")) $("#bank").value = s.bank_total ?? "";
     const diff = $("#diff");
     if (s.difference == null) { diff.className = "diff"; diff.textContent = ""; }
@@ -548,21 +702,21 @@ function render() {
     }
   }
 
-  // Cashiers
-  $("#waiters").innerHTML = s.by_waiter.length ? s.by_waiter.map((w) =>
-    `<tr><td><strong>${esc(w.name)}</strong></td><td class="n">${w.count}</td><td class="n"><strong>${money(w.total)}</strong></td><td class="n" style="color:var(--ok)">${money(w.verified)}</td></tr>`).join("")
-    : `<tr><td colspan="4" class="empty">No cashier sales recorded</td></tr>`;
+  // Breakdown tables (Owner only)
+  if (!isWaiter) {
+    $("#waiters").innerHTML = (s.by_waiter && s.by_waiter.length) ? s.by_waiter.map((w) =>
+      `<tr><td><strong>${esc(w.name)}</strong></td><td class="n">${w.count}</td><td class="n"><strong>${money(w.total)}</strong></td><td class="n" style="color:var(--ok)">${money(w.verified)}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="empty">No cashier sales recorded</td></tr>`;
 
-  // Customers
-  const custs = s.by_customer || [];
-  $("#customers").innerHTML = custs.length ? custs.map((c) =>
-    `<tr><td>${esc(c.name)}</td><td class="n">${c.count}</td><td class="n"><strong>${money(c.total)}</strong></td></tr>`).join("")
-    : `<tr><td colspan="3" class="empty">No customer names recorded</td></tr>`;
+    const custs = s.by_customer || [];
+    $("#customers").innerHTML = custs.length ? custs.map((c) =>
+      `<tr><td>${esc(c.name)}</td><td class="n">${c.count}</td><td class="n"><strong>${money(c.total)}</strong></td></tr>`).join("")
+      : `<tr><td colspan="3" class="empty">No customer names recorded</td></tr>`;
 
-  // Banks
-  $("#banks").innerHTML = s.by_bank.length ? s.by_bank.map((b) =>
-    `<tr><td><strong>${esc(b.bank)}</strong></td><td class="n">${b.count}</td><td class="n"><strong>${money(b.total)}</strong></td></tr>`).join("")
-    : `<tr><td colspan="3" class="empty">No bank breakdown</td></tr>`;
+    $("#banks").innerHTML = (s.by_bank && s.by_bank.length) ? s.by_bank.map((b) =>
+      `<tr><td><strong>${esc(b.bank)}</strong></td><td class="n">${b.count}</td><td class="n"><strong>${money(b.total)}</strong></td></tr>`).join("")
+      : `<tr><td colspan="3" class="empty">No bank breakdown</td></tr>`;
+  }
 
   // Filter chips
   $("#chips").innerHTML = FILTERS.map(([key, label, fn]) =>
@@ -579,30 +733,29 @@ function render() {
 }
 
 function card(p) {
-  const thumb = p.has_photo
-    ? `<img class="thumb" loading="lazy" data-photo="${p.id}" src="api/photo/${p.id}?auth=${encodeURIComponent(AUTH)}" alt="">`
-    : `<div class="thumb">⌨️</div>`;
-  const dup = p.duplicate_of ? `<span class="badge b-dup">DUP #${p.duplicate_of}</span> ` : "";
-  const details = [p.qr_data && `QR:\n${p.qr_data}`, p.raw_text && `Text:\n${p.raw_text}`, p.ocr_text && `OCR:\n${p.ocr_text}`]
-    .filter(Boolean).join("\n\n");
+  const isOwner = state.me && (state.me.is_superadmin || state.me.role === "owner");
   const editing = state.editing === p.id;
-  const payerStr = p.payer ? ` · Customer: <b>${esc(p.payer)}</b>` : "";
-  const toStr = (p.receiver || p.receiver_account) ? ` · To: ${esc(p.receiver || "")} (${esc(p.receiver_account || "")})` : "";
+  const dup = p.duplicate_of ? `<span class="badge b-dup">DUP OF #${p.duplicate_of}</span> ` : "";
+  const who = p.waiter || "Cashier";
+  const payer = p.payer ? ` · from <b>${esc(p.payer)}</b>` : "";
+  const details = [p.receiver && `To: ${p.receiver}`, p.raw_text].filter(Boolean).join("\n");
 
   return `<div class="pay" data-id="${p.id}">
-    ${thumb}
+    ${p.has_photo
+      ? `<img class="thumb" src="api/photo/${p.id}?auth=${encodeURIComponent(AUTH)}" data-photo loading="lazy" alt="Receipt">`
+      : `<div class="thumb">📄</div>`}
     <div class="info">
       <div class="l1">
-        <span class="ref ${p.tx_ref ? "" : "missing"}">${p.tx_ref ? esc(p.tx_ref) : "no code"}</span>
-        <span class="amt ${p.amount == null ? "missing" : ""}">${money(p.amount)}</span>
+        <span class="ref ${p.tx_ref ? "" : "missing"}">${esc(p.tx_ref || "❓ NO CODE")}</span>
+        <span class="amt ${p.amount != null ? "" : "missing"}">${money(p.amount)}</span>
       </div>
-      <div class="meta">#${p.id} · ${p.bank ? `<b>${esc(p.bank)}</b> · ` : ""}Cashier: <b>${esc(p.waiter)}</b>${payerStr}${toStr}</div>
+      <div class="meta"><b>${esc(p.bank || "Bank")}</b> · by <b>${esc(who)}</b>${payer}</div>
       <div class="meta">${esc(p.day)} ${esc(p.time)} · ${dup}<span class="badge b-${p.status}">${p.status}</span></div>
       ${p.flags.map((f) => `<div class="note bad">🚩 ${esc(f)}</div>`).join("")}
       ${p.bank_check_msg ? `<div class="note ${p.bank_check === "ok" ? "good" : (p.bank_check === "mismatch" || p.bank_check === "not_found") ? "bad" : ""}">${CHECK_ICONS[p.bank_check] || "ℹ️"} ${esc(p.bank_check_msg)}</div>` : ""}
       ${p.note ? `<div class="note">ℹ️ ${esc(p.note)}</div>` : ""}
-      ${details ? `<details><summary>Raw Details</summary><pre>${esc(details)}</pre></details>` : ""}
-      ${editing ? `<div class="edit">
+      ${details && isOwner ? `<details><summary>Raw Details</summary><pre>${esc(details)}</pre></details>` : ""}
+      ${isOwner ? (editing ? `<div class="edit">
           <input data-f="tx_ref" value="${esc(p.tx_ref ?? "")}" placeholder="Transaction code">
           <input data-f="amount" type="number" step="0.01" inputmode="decimal" value="${p.amount ?? ""}" placeholder="Amount">
           <button class="small" data-act="save">Save</button><button class="small ghost" data-act="cancel">Cancel</button>
@@ -614,12 +767,12 @@ function card(p) {
           <button class="small ghost" data-act="edit">✎ Edit</button>
           ${p.tx_ref || p.receipt_url ? `<button class="small ghost" data-act="check">🏦 Check bank</button>` : ""}
           ${p.receipt_url ? `<button class="small ghost" data-act="open" data-url="${esc(p.receipt_url)}">🔗 View receipt</button>` : ""}
-        </div>`}
+        </div>`) : (p.receipt_url ? `<div class="actions"><button class="small ghost" data-act="open" data-url="${esc(p.receipt_url)}">🔗 View receipt</button></div>` : "")}
     </div>
   </div>`;
 }
 
-// TAB 2: Accounts Form Loading & Saving
+// -------------------- ACCOUNTS & CASHIERS (OWNER ONLY) --------------------
 async function loadAccountsForm() {
   if (!state.data) return;
   const b = state.data.business;
@@ -639,7 +792,7 @@ $("#formAccounts").addEventListener("submit", async (e) => {
       names: $("#inpNames").value.trim(),
       code: $("#inpCode").value.trim(),
     };
-    const res = await api(`api/business/${state.activeBizId}/settings`, "PUT", body);
+    await api(`api/business/${state.activeBizId}/settings`, "PUT", body);
     haptic("success");
     alertMsg("✅ Payment accounts & fraud rules saved successfully!");
     await loadReport();
@@ -648,7 +801,6 @@ $("#formAccounts").addEventListener("submit", async (e) => {
   }
 });
 
-// TAB 3: Waiters Management
 async function loadWaitersTab() {
   try {
     const res = await api(`api/business/${state.activeBizId}/waiters`);
@@ -656,7 +808,6 @@ async function loadWaitersTab() {
     const pending = waiters.filter((w) => !w.active);
     const active = waiters.filter((w) => w.active);
 
-    // Pending Section
     const pCard = $("#pendingWaitersCard");
     if (pending.length) {
       pCard.style.display = "block";
@@ -676,7 +827,6 @@ async function loadWaitersTab() {
       pCard.style.display = "none";
     }
 
-    // Active Section
     if (active.length) {
       $("#registeredWaitersList").innerHTML = active.map((w) => `
         <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid var(--bg2);">
@@ -691,7 +841,7 @@ async function loadWaitersTab() {
         </div>
       `).join("");
     } else {
-      $("#registeredWaitersList").innerHTML = `<div class="empty">No registered cashiers yet. Add one above!</div>`;
+      $("#registeredWaitersList").innerHTML = `<div class="empty">No registered cashiers yet. Register one above!</div>`;
     }
   } catch (err) {
     $("#registeredWaitersList").innerHTML = `<div class="empty" style="color:var(--bad);">${esc(err.message)}</div>`;
@@ -714,50 +864,70 @@ $("#formAddWaiter").addEventListener("submit", async (e) => {
   }
 });
 
+// -------------------- EVENT LISTENERS --------------------
 document.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-waiter-act]");
-  if (!btn) return;
-  const act = btn.dataset.waiterAct;
-  const wid = btn.dataset.wid;
-  try {
-    btn.disabled = true;
-    if (act === "approve") {
-      await api(`api/business/${state.activeBizId}/waiters/${wid}`, "PATCH", { active: true });
-      haptic("success");
-    } else if (act === "deactivate") {
-      await api(`api/business/${state.activeBizId}/waiters/${wid}`, "PATCH", { active: false });
-      haptic("warning");
-    } else if (act === "delete") {
-      if (!await confirmMsg("Remove this cashier?")) { btn.disabled = false; return; }
-      await api(`api/business/${state.activeBizId}/waiters/${wid}`, "DELETE");
-      haptic("warning");
+  // Cashier action
+  const wBtn = e.target.closest("[data-waiter-act]");
+  if (wBtn) {
+    const act = wBtn.dataset.waiterAct;
+    const wid = wBtn.dataset.wid;
+    try {
+      wBtn.disabled = true;
+      if (act === "approve") {
+        await api(`api/business/${state.activeBizId}/waiters/${wid}`, "PATCH", { active: true });
+        haptic("success");
+      } else if (act === "deactivate") {
+        await api(`api/business/${state.activeBizId}/waiters/${wid}`, "PATCH", { active: false });
+        haptic("warning");
+      } else if (act === "delete") {
+        if (!await confirmMsg("Remove this cashier?")) { wBtn.disabled = false; return; }
+        await api(`api/business/${state.activeBizId}/waiters/${wid}`, "DELETE");
+        haptic("warning");
+      }
+      await loadWaitersTab();
+    } catch (err) { alertMsg(err.message); wBtn.disabled = false; }
+    return;
+  }
+
+  // Store Management (Bot Owner actions)
+  const sBtn = e.target.closest("[data-store-act]");
+  if (sBtn) {
+    const act = sBtn.dataset.storeAct;
+    const bid = Number(sBtn.dataset.bid);
+    if (act === "view") {
+      state.activeBizId = bid;
+      $("#bizSelect").value = bid;
+      switchTab("tabSales");
+      await loadReport();
+    } else if (act === "edit") {
+      const formEl = document.getElementById(`editBizForm_${bid}`);
+      formEl.style.display = formEl.style.display === "none" ? "block" : "none";
+    } else if (act === "cancel") {
+      document.getElementById(`editBizForm_${bid}`).style.display = "none";
+    } else if (act === "save") {
+      const name = document.getElementById(`editName_${bid}`).value.trim();
+      const code = document.getElementById(`editCode_${bid}`).value.trim();
+      const owner_id = document.getElementById(`editOwner_${bid}`).value.trim();
+      try {
+        await api(`api/business/${bid}`, "PUT", { name, code, owner_id });
+        haptic("success");
+        alertMsg("✅ Business & owner updated successfully!");
+        await loadAllStores();
+      } catch (err) { alertMsg(err.message); }
+    } else if (act === "toggle") {
+      const curActive = sBtn.dataset.active === "1" || sBtn.dataset.active === "true";
+      try {
+        await api(`api/business/${bid}`, "PUT", { active: !curActive });
+        haptic("warning");
+        await loadAllStores();
+        await loadPlatformStats();
+      } catch (err) { alertMsg(err.message); }
     }
-    await loadWaitersTab();
-  } catch (err) {
-    alertMsg(err.message);
-    btn.disabled = false;
+    return;
   }
 });
 
-// TAB 4: Super Admin All Stores
-async function loadAllStores() {
-  try {
-    const res = await api("api/businesses");
-    const list = res.businesses || [];
-    $("#allStoresList").innerHTML = list.length ? list.map((b) => `
-      <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-bottom:1px solid var(--bg2);">
-        <div>
-          <strong>#${b.id} ${esc(b.name)}</strong>
-          <div style="font-size:11.5px; color:var(--hint);">Code: <code>${esc(b.code)}</code> · Currency: ${esc(b.currency)}</div>
-        </div>
-        <button class="small ghost" data-select-biz="${b.id}">Manage</button>
-      </div>
-    `).join("") : `<div class="empty">No businesses registered yet.</div>`;
-  } catch (err) {
-    $("#allStoresList").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
-  }
-}
-
+// Bot Owner Form Submit
 $("#formNewBusiness").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
@@ -767,50 +937,33 @@ $("#formNewBusiness").addEventListener("submit", async (e) => {
       code: $("#inpNewBizCode").value.trim(),
       cbe: $("#inpNewBizCbe").value.trim(),
       telebirr: $("#inpNewBizTb").value.trim(),
+      names: $("#inpNewBizNames").value.trim(),
     };
     const res = await api("api/businesses", "POST", body);
     haptic("success");
-    alertMsg(`✅ Store '${res.business.name}' created successfully!`);
+    alertMsg(`✅ Store '${res.business.name}' created and owner assigned!`);
     $("#inpNewBizName").value = "";
     $("#inpNewBizOwner").value = "";
     $("#inpNewBizCode").value = "";
     $("#inpNewBizCbe").value = "";
     $("#inpNewBizTb").value = "";
+    $("#inpNewBizNames").value = "";
+    switchTab("tabBotStores");
     await loadAllStores();
+    await loadPlatformStats();
   } catch (err) {
     alertMsg(err.message);
   }
 });
 
-document.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-select-biz]");
-  if (!btn) return;
-  const bid = Number(btn.dataset.selectBiz);
-  state.activeBizId = bid;
-  $("#bizSelect").value = bid;
-  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-  $("[data-tab='tabSales']").classList.add("active");
-  document.querySelectorAll(".tab-pane").forEach((p) => p.style.display = "none");
-  $("#tabSales").style.display = "block";
-  await loadReport();
-  if (state.me && (state.me.is_superadmin || state.me.role === "owner")) {
-    await loadAccountsForm();
-    await loadWaitersTab();
-  }
-});
+$("#btnGoOnboard").addEventListener("click", () => switchTab("tabBotOnboard"));
 
-// Main Tab Navigation
+// Nav clicks
 document.querySelectorAll(".nav-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    const target = btn.dataset.tab;
-    document.querySelectorAll(".tab-pane").forEach((p) => p.style.display = "none");
-    $(`#${target}`).style.display = "block";
-  });
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
-// Period Tabs & Selectors
+// Period tabs
 document.querySelectorAll(".period-tab").forEach((tab) => {
   tab.addEventListener("click", async () => {
     document.querySelectorAll(".period-tab").forEach((t) => t.classList.remove("active"));
@@ -824,7 +977,7 @@ document.querySelectorAll(".period-tab").forEach((tab) => {
 $("#bizSelect").addEventListener("change", async (e) => {
   state.activeBizId = Number(e.target.value);
   await loadReport();
-  if (state.me && (state.me.is_superadmin || state.me.role === "owner")) {
+  if (state.me && state.me.role === "owner") {
     await loadAccountsForm();
     await loadWaitersTab();
   }
@@ -837,16 +990,31 @@ $("#periodValSelect").addEventListener("change", async (e) => {
 
 $("#chips").addEventListener("click", (e) => {
   const c = e.target.closest("[data-filter]");
-  if (c) { state.filter = c.dataset.filter; render(); }
+  if (!c) return;
+  state.filter = c.dataset.filter;
+  render();
 });
-$("#search").addEventListener("input", (e) => { state.q = e.target.value.trim(); render(); });
+
+$("#search").addEventListener("input", (e) => {
+  state.q = e.target.value;
+  render();
+});
+
 $("#refresh").addEventListener("click", async () => {
+  if (state.me.is_superadmin) {
+    await loadAllStores();
+    await loadPlatformStats();
+  }
   await loadReport();
-  await loadWaitersTab();
+  if (state.me.role === "owner") {
+    await loadAccountsForm();
+    await loadWaitersTab();
+  }
+  haptic("light");
 });
+
 $("#viewer").addEventListener("click", () => { $("#viewer").style.display = "none"; });
 
-// Bank Total Save
 $("#saveBank").addEventListener("click", async () => {
   try {
     const s = await api(`api/day/${state.periodValue}/bank?business_id=${state.activeBizId}`, "PUT", {bank_total: $("#bank").value});
@@ -854,7 +1022,6 @@ $("#saveBank").addEventListener("click", async () => {
   } catch (err) { alertMsg(err.message); }
 });
 
-// Verify All Pending
 $("#verifyAll").addEventListener("click", async () => {
   if (!await confirmMsg("Mark all clean pending entries as verified?")) return;
   try {
@@ -865,7 +1032,6 @@ $("#verifyAll").addEventListener("click", async () => {
   } catch (err) { alertMsg(err.message); }
 });
 
-// Download PDF
 $("#btnPdf").addEventListener("click", () => {
   const query = new URLSearchParams({
     business_id: state.activeBizId,
@@ -874,14 +1040,10 @@ $("#btnPdf").addEventListener("click", () => {
     auth: AUTH
   });
   const url = `api/pdf?${query.toString()}`;
-  if (tg) {
-    tg.openLink(window.location.origin + "/" + url);
-  } else {
-    window.location.href = url;
-  }
+  if (tg) tg.openLink(window.location.origin + "/" + url);
+  else window.location.href = url;
 });
 
-// Export CSV
 $("#export").addEventListener("click", async () => {
   try {
     await api(`api/day/${state.periodValue}/export?business_id=${state.activeBizId}`, "POST");
@@ -889,7 +1051,6 @@ $("#export").addEventListener("click", async () => {
   } catch (err) { alertMsg(err.message); }
 });
 
-// Ledger Actions
 $("#list").addEventListener("click", async (e) => {
   const photo = e.target.closest("[data-photo]");
   if (photo) { $("#viewer img").src = photo.src; $("#viewer").style.display = "flex"; return; }

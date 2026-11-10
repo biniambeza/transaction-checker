@@ -237,11 +237,82 @@ async def api_join_business(request: web.Request) -> web.Response:
 async def api_businesses(request: web.Request) -> web.Response:
     uid = request["user"]["id"]
     is_admin = db.is_superadmin(uid)
-    businesses = db.list_all_businesses() if is_admin else db.get_user_owned_businesses(uid)
+    businesses = db.list_all_businesses_with_details() if is_admin else db.get_user_owned_businesses(uid)
     return web.json_response({
         "businesses": businesses,
         "is_superadmin": is_admin
     })
+
+
+async def api_platform_stats(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    if not db.is_superadmin(uid):
+        raise web.HTTPForbidden(text="Only bot owner can view platform stats")
+    return web.json_response(db.get_platform_stats())
+
+
+async def api_update_business(request: web.Request) -> web.Response:
+    """Bot Owner updates a business and assigned owner."""
+    uid = request["user"]["id"]
+    if not db.is_superadmin(uid):
+        raise web.HTTPForbidden(text="Only bot owner can update businesses")
+
+    bid = int(request.match_info["id"])
+    biz = db.get_business(bid)
+    if not biz:
+        raise web.HTTPNotFound(text="Business not found")
+
+    body = await request.json()
+    updates = {}
+    if "name" in body and body["name"].strip():
+        updates["name"] = body["name"].strip()
+    if "code" in body and body["code"].strip():
+        updates["code"] = re.sub(r"[^a-zA-Z0-9_-]", "", body["code"].strip()).lower()
+    if "active" in body:
+        updates["active"] = 1 if body["active"] else 0
+    if "accounts" in body:
+        updates["accounts"] = body["accounts"].strip()
+    if "names" in body:
+        updates["names"] = body["names"].strip()
+
+    if updates:
+        db.update_business(bid, **updates)
+
+    # Re-assign owner if provided
+    owner_str = str(body.get("owner_id") or "").strip()
+    if owner_str:
+        owner_id = None
+        if owner_str.isdigit():
+            owner_id = int(owner_str)
+        elif owner_str.startswith("@"):
+            u = db.get_user_by_username(owner_str)
+            if u:
+                owner_id = u["tg_id"]
+        if owner_id:
+            db.set_business_owner(bid, owner_id)
+            bot = request.app.get(BOT_KEY)
+            if bot:
+                try:
+                    await bot.send_message(
+                        owner_id,
+                        f"🎉 <b>You are now the assigned Owner of {biz['name']}!</b>\n\n"
+                        f"Open your live WebApp dashboard to manage your cashiers and view sales.",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+    return web.json_response({"ok": True, "business": db.get_business(bid)})
+
+
+async def api_delete_business(request: web.Request) -> web.Response:
+    """Bot Owner deactivates or removes a business."""
+    uid = request["user"]["id"]
+    if not db.is_superadmin(uid):
+        raise web.HTTPForbidden(text="Only bot owner can remove businesses")
+    bid = int(request.match_info["id"])
+    db.delete_business(bid)
+    return web.json_response({"ok": True, "message": "Business deactivated"})
 
 
 async def api_create_business(request: web.Request) -> web.Response:
@@ -436,6 +507,8 @@ async def api_delete_waiter(request: web.Request) -> web.Response:
 
 async def api_report_data(request: web.Request) -> web.Response:
     biz = get_req_business(request)
+    uid = request["user"]["id"]
+    role = request["role"]
     period_type = request.query.get("period_type", "day").lower()
     if period_type not in ("day", "month", "year"):
         period_type = "day"
@@ -451,11 +524,21 @@ async def api_report_data(request: web.Request) -> web.Response:
             period_val = today[:4]
 
     rows = db.payments_for_period(biz["id"], period_type, period_val)
-    summary = db.summary(business_id=biz["id"], period_type=period_type, period_value=period_val, rows=rows)
+
+    # Cashier role: strictly show ONLY this cashier's sent money amounts
+    if role == "waiter":
+        rows = [r for r in rows if r.get("waiter_id") == uid]
+        summary = db.summary(business_id=biz["id"], period_type=period_type, period_value=period_val, rows=rows)
+        summary["by_waiter"] = {}
+        summary["by_bank"] = {}
+        summary["by_payer"] = {}
+        summary["bank_total"] = None
+    else:
+        summary = db.summary(business_id=biz["id"], period_type=period_type, period_value=period_val, rows=rows)
 
     return web.json_response({
         "business": biz,
-        "accounts_split": _split_accounts(biz["accounts"]),
+        "accounts_split": _split_accounts(biz["accounts"]) if role != "waiter" else {},
         "currency": biz.get("currency") or config.CURRENCY,
         "period_type": period_type,
         "period_value": period_val,
@@ -465,7 +548,7 @@ async def api_report_data(request: web.Request) -> web.Response:
             "days": db.recent_days(biz["id"]),
             "months": db.recent_months(biz["id"]),
             "years": db.recent_years(biz["id"]),
-        }
+        } if role != "waiter" else {"days": [], "months": [], "years": []}
     })
 
 
@@ -618,6 +701,9 @@ async def start_web(bot) -> web.AppRunner:
         web.post("/api/join", api_join_business),
         web.get("/api/businesses", api_businesses),
         web.post("/api/businesses", api_create_business),
+        web.put("/api/business/{id:\\d+}", api_update_business),
+        web.delete("/api/business/{id:\\d+}", api_delete_business),
+        web.get("/api/platform/stats", api_platform_stats),
         web.put("/api/business/{id}/settings", api_business_settings),
         web.get("/api/business/{id}/waiters", api_business_waiters),
         web.post("/api/business/{id}/waiters", api_add_waiter),

@@ -229,10 +229,54 @@ def get_business_owners(business_id: int) -> list[dict]:
                      WHERE bo.business_id=?""", (business_id,))
 
 
+def is_business_owner_strict(business_id: int, tg_id: int) -> bool:
+    """Strictly checks if user is an assigned owner of this business."""
+    return bool(_one("SELECT 1 FROM business_owners WHERE business_id=? AND tg_id=?", (business_id, tg_id)))
+
+
 def is_business_owner(business_id: int, tg_id: int) -> bool:
     if is_superadmin(tg_id):
         return True
-    return bool(_one("SELECT 1 FROM business_owners WHERE business_id=? AND tg_id=?", (business_id, tg_id)))
+    return is_business_owner_strict(business_id, tg_id)
+
+
+def set_business_owner(business_id: int, tg_id: int) -> None:
+    """Replaces current owners with the specified tg_id."""
+    _exec("DELETE FROM business_owners WHERE business_id=?", (business_id,))
+    add_business_owner(business_id, tg_id)
+
+
+def delete_business(business_id: int) -> None:
+    """Deactivates a business."""
+    _exec("UPDATE businesses SET active=0 WHERE id=?", (business_id,))
+
+
+def list_all_businesses_with_details() -> list[dict]:
+    """Returns all businesses enriched with owners, cashiers count, and transaction stats."""
+    businesses = _query("SELECT * FROM businesses ORDER BY id DESC")
+    for b in businesses:
+        b["owners"] = get_business_owners(b["id"])
+        w_cnt = _one("SELECT count(*) as c FROM business_waiters WHERE business_id=? AND active=1", (b["id"],))
+        b["waiters_count"] = w_cnt["c"] if w_cnt else 0
+        tx_stat = _one("SELECT count(*) as cnt, coalesce(sum(amount), 0) as tot FROM payments WHERE business_id=?", (b["id"],))
+        b["payments_count"] = tx_stat["cnt"] if tx_stat else 0
+        b["payments_total"] = tx_stat["tot"] if tx_stat else 0.0
+    return businesses
+
+
+def get_platform_stats() -> dict:
+    """Aggregates platform-wide stats for the bot owner."""
+    total_biz = _one("SELECT count(*) as c FROM businesses")["c"]
+    active_biz = _one("SELECT count(*) as c FROM businesses WHERE active=1")["c"]
+    total_waiters = _one("SELECT count(DISTINCT tg_id) as c FROM business_waiters WHERE active=1")["c"]
+    total_tx = _one("SELECT count(*) as c, coalesce(sum(amount), 0) as s FROM payments WHERE status='verified'")
+    return {
+        "total_businesses": total_biz,
+        "active_businesses": active_biz,
+        "total_cashiers": total_waiters,
+        "total_verified_tx": total_tx["c"] if total_tx else 0,
+        "total_verified_amount": total_tx["s"] if total_tx else 0.0
+    }
 
 
 def get_user_owned_businesses(tg_id: int) -> list[dict]:
