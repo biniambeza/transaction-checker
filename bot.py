@@ -64,10 +64,12 @@ OWNER_HELP = (
 )
 
 SUPERADMIN_HELP = (
-    "⚡ <b>Platform Super Admin Commands</b>\n\n"
-    "/newbusiness &lt;Name&gt; [code] [owner_tg_id] – register a new business / store\n"
-    "/setowner &lt;biz_id_or_code&gt; &lt;tg_id&gt; – assign a business owner\n"
-    "/allbusinesses – view all registered businesses on the platform\n\n"
+    "⚡ <b>Platform Owner Commands (You control everything)</b>\n\n"
+    "👑 <b>Register & Onboard Business Clients:</b>\n"
+    "• <code>/registerowner &lt;tg_id&gt; &lt;Business Name&gt;</code> – onboard a new cafe / supermarket owner in one step!\n"
+    "  <i>(Tip: Forward any message from the owner and reply with <code>/registerowner Business Name</code>)</i>\n"
+    "• <code>/setowner &lt;biz_id_or_code&gt; &lt;tg_id&gt;</code> – assign or change the owner of any business\n"
+    "• <code>/allbusinesses</code> – list all registered businesses on the platform\n\n"
     + OWNER_HELP
 )
 
@@ -1220,6 +1222,81 @@ async def cmd_remove(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ------------------------------------------------------------------ platform super admin commands
 @superadmin_only
+async def cmd_registerowner(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Shortcut for platform owner: /registerowner <owner_tg_id> <Business Name>"""
+    msg = update.effective_message
+    if not ctx.args and not (msg.reply_to_message and msg.reply_to_message.from_user):
+        await msg.reply_html(
+            "<b>How to register a Business Owner:</b>\n\n"
+            "Usage: <code>/registerowner &lt;owner_tg_id&gt; &lt;Business Name&gt;</code>\n"
+            "Example: <code>/registerowner 987654321 Friendship Supermarket</code>\n\n"
+            "💡 <i>Tip: You can also forward any message from the client to this chat and reply with <code>/registerowner Friendship Supermarket</code>!</i>"
+        )
+        return
+
+    owner_id = None
+    name = ""
+
+    if msg.reply_to_message and msg.reply_to_message.from_user:
+        owner_id = msg.reply_to_message.from_user.id
+        name = " ".join(ctx.args).strip()
+    elif ctx.args:
+        first = ctx.args[0].strip()
+        if first.isdigit():
+            owner_id = int(first)
+            name = " ".join(ctx.args[1:]).strip()
+        elif first.startswith("@"):
+            u = db.get_user_by_username(first)
+            if u:
+                owner_id = u["tg_id"]
+                name = " ".join(ctx.args[1:]).strip()
+            else:
+                await msg.reply_html(f"❌ User <code>{H(first)}</code> hasn't messaged the bot yet. Ask them to press /start to get their Telegram ID.")
+                return
+
+    if not owner_id or not name:
+        await msg.reply_html("Usage: <code>/registerowner &lt;owner_tg_id&gt; &lt;Business Name&gt;</code>\nExample: <code>/registerowner 987654321 Friendship Supermarket</code>")
+        return
+
+    bid = db.create_business(name=name)
+    biz = db.get_business(bid)
+    db.add_business_owner(bid, owner_id)
+
+    await msg.reply_html(
+        f"✅ <b>Business Owner Successfully Registered!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"• Business: <b>{H(name)}</b> (ID: <code>{bid}</code>)\n"
+        f"• Owner Telegram ID: <code>{owner_id}</code>\n"
+        f"• Cashier Join Code: <code>{biz['code']}</code>\n\n"
+        f"The client now has full business owner access to manage <b>{H(name)}</b>:\n"
+        f"• They can set their CBE & telebirr accounts with /setcbe & /settelebirr\n"
+        f"• They can register their cashiers with /addwaiter\n"
+        f"• They will get instant transaction alerts and reports for {H(name)}."
+    )
+
+    try:
+        await ctx.bot.send_message(
+            owner_id,
+            f"🎉 <b>Welcome! You have been registered as the Owner of {H(name)}!</b>\n\n"
+            f"• Business ID: <code>{bid}</code>\n"
+            f"• Cashier Join Code: <code>{biz['code']}</code>\n\n"
+            "Here is how to get started:\n"
+            "1️⃣ <b>Set your payment accounts</b> (only payments to your accounts will be accepted):\n"
+            "   • <code>/setcbe 1000...</code> (your 13-digit CBE account)\n"
+            "   • <code>/settelebirr 0911...</code> (your telebirr phone or merchant till)\n"
+            "   • <code>/setnames Store Legal Name PLC</code> (account name on receipts)\n\n"
+            "2️⃣ <b>Register your cashiers / waiters:</b>\n"
+            "   • <code>/addwaiter &lt;cashier_telegram_id&gt; [Counter Name]</code>\n\n"
+            "3️⃣ <b>Live Dashboard & Reports:</b>\n"
+            "   Whenever a cashier sends a receipt photo (QR or code), you get an instant verified payment notification.\n"
+            "   Use /report to open your WebApp dashboard and /pdf to download financial reports.\n\n" + OWNER_HELP,
+            parse_mode="HTML"
+        )
+    except TelegramError:
+        pass
+
+
+@superadmin_only
 async def cmd_newbusiness(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Registers a new business on the platform. Usage: /newbusiness "Name" [code] [owner_id]"""
     if not ctx.args:
@@ -1418,6 +1495,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("remove", cmd_remove, private))
 
     # Super Admin commands
+    app.add_handler(CommandHandler(["registerowner", "registerbusiness", "onboard"], cmd_registerowner, private))
     app.add_handler(CommandHandler("newbusiness", cmd_newbusiness, private))
     app.add_handler(CommandHandler("setowner", cmd_setowner, private))
     app.add_handler(CommandHandler("allbusinesses", cmd_allbusinesses, private))
