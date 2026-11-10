@@ -20,7 +20,19 @@ async def main() -> None:
     tunnel_proc = None
     runner = None
     app = build_application()
-    async with app:
+
+    # Retry initializing bot connection in case of network hiccups
+    for attempt in range(1, 6):
+        try:
+            await app.initialize()
+            break
+        except Exception as e:
+            if attempt == 5:
+                raise
+            log.warning("Connecting to Telegram timed out (attempt %d/5: %s). Retrying in 4s...", attempt, e)
+            await asyncio.sleep(4)
+
+    try:
         runner = await start_web(app.bot)
         if not config.WEBAPP_URL:
             tunnel_proc, t_url = await tunnel.start_tunnel(config.WEB_PORT)
@@ -28,16 +40,16 @@ async def main() -> None:
                 config.WEBAPP_URL = t_url
                 log.info("Dashboard URL: %s", config.WEBAPP_URL)
 
-        # Retry bot setup up to 3 times in case of startup network hiccups
-        for attempt in range(1, 4):
+        # Retry bot setup commands
+        for attempt in range(1, 5):
             try:
                 await setup_bot(app)
                 break
-            except NetworkError as e:
-                if attempt == 3:
-                    raise
-                log.warning("Connecting to Telegram timed out or failed (attempt %d/3: %s). Retrying in 5 seconds...", attempt, e)
-                await asyncio.sleep(5)
+            except Exception as e:
+                if attempt == 4:
+                    log.warning("Setup bot menu commands skipped: %s", e)
+                    break
+                await asyncio.sleep(3)
 
         await app.start()
         await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
@@ -48,13 +60,15 @@ async def main() -> None:
         finally:
             await app.updater.stop()
             await app.stop()
-            if runner:
-                await runner.cleanup()
-            if tunnel_proc:
-                await tunnel.close_tunnel(tunnel_proc)
-            import receipt_browser
-            if receipt_browser.AVAILABLE:
-                await receipt_browser.close()
+    finally:
+        await app.shutdown()
+        if runner:
+            await runner.cleanup()
+        if tunnel_proc:
+            await tunnel.close_tunnel(tunnel_proc)
+        import receipt_browser
+        if receipt_browser.AVAILABLE:
+            await receipt_browser.close()
 
 
 if __name__ == "__main__":
