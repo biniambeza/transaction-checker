@@ -9,7 +9,7 @@ import time
 from urllib.parse import parse_qsl
 
 from aiohttp import web
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 import banks
 import config
@@ -171,6 +171,7 @@ async def api_me(request: web.Request) -> web.Response:
         "active_business_id": user_row.get("active_business_id") if user_row else None,
         "owned_businesses": owned,
         "waiter_businesses": waiter_b,
+        "pending_business_request": db.get_user_pending_business_request(uid),
     })
 
 
@@ -210,7 +211,8 @@ async def api_join_business(request: web.Request) -> web.Response:
     if bot:
         owners = db.get_business_owners(biz["id"])
         owner_ids = {o["tg_id"] for o in owners}
-        owner_ids.update(config.OWNER_IDS)
+        if not owner_ids:
+            owner_ids = set(config.OWNER_IDS)
         markup = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Approve Cashier", callback_data=f"waiter_appr:{biz['id']}:{uid}"),
@@ -232,6 +234,142 @@ async def api_join_business(request: web.Request) -> web.Response:
             except Exception:
                 pass
     return web.json_response({"ok": True, "message": f"Join request sent to the owner of {biz['name']}! They will approve you shortly."})
+
+
+async def api_request_business(request: web.Request) -> web.Response:
+    """User requests to register as a business owner."""
+    uid = request["user"]["id"]
+    u = db.get_user(uid) or {}
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid request payload"}, status=400)
+
+    name = (body.get("business_name") or "").strip()
+    if not name:
+        return web.json_response({"error": "Business name is required"}, status=400)
+
+    category = (body.get("category") or "").strip()
+    phone = (body.get("phone") or "").strip()
+    code = (body.get("code") or "").strip().lower()
+    cbe = (body.get("cbe") or "").strip()
+    telebirr = (body.get("telebirr") or "").strip()
+    names = (body.get("names") or "").strip()
+
+    req_id = db.create_business_request(
+        tg_id=uid,
+        user_name=u.get("name") or request["user"].get("first_name", ""),
+        username=u.get("username") or request["user"].get("username"),
+        business_name=name,
+        category=category,
+        phone=phone,
+        code=code,
+        cbe=cbe,
+        telebirr=telebirr,
+        names=names
+    )
+
+    # Notify Super Admin (Platform Owner)
+    bot = request.app.get(BOT_KEY)
+    if bot:
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Approve Business", callback_data=f"biz_req_appr:{req_id}"),
+                InlineKeyboardButton("❌ Decline", callback_data=f"biz_req_decl:{req_id}")
+            ]
+        ])
+        for admin_id in config.OWNER_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"🏢 <b>New Business Owner Request!</b>\n\n"
+                    f"• <b>Business:</b> {html.escape(name)}\n"
+                    f"• <b>Category:</b> {html.escape(category or 'General')}\n"
+                    f"• <b>Applicant:</b> {html.escape(u.get('name') or str(uid))}" + (f" (@{u.get('username')})" if u.get('username') else "") + f"\n"
+                    f"• <b>Telegram ID:</b> <code>{uid}</code>\n"
+                    f"• <b>Phone:</b> {html.escape(phone or 'Not provided')}\n"
+                    f"• <b>Desired Code:</b> <code>{html.escape(code or 'auto')}</code>\n"
+                    f"• <b>CBE Account:</b> {html.escape(cbe or 'None')}\n"
+                    f"• <b>telebirr:</b> {html.escape(telebirr or 'None')}\n"
+                    f"• <b>Legal Name:</b> {html.escape(names or 'None')}\n\n"
+                    f"Tap below to approve or decline:",
+                    reply_markup=markup,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    return web.json_response({
+        "ok": True,
+        "message": "Your request has been submitted to the platform admin! You will be notified in Telegram as soon as it is approved."
+    })
+
+
+async def api_list_business_requests(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    if not db.is_superadmin(uid):
+        raise web.HTTPForbidden(text="Only platform admin can view business requests")
+    return web.json_response({
+        "requests": db.list_all_business_requests(),
+        "pending": db.list_pending_business_requests()
+    })
+
+
+async def api_approve_business_request(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    if not db.is_superadmin(uid):
+        raise web.HTTPForbidden(text="Only platform admin can approve business requests")
+    req_id = int(request.match_info["id"])
+    approved = db.approve_business_request(req_id, uid)
+    if not approved:
+        raise web.HTTPNotFound(text="Request not found or already processed")
+
+    # Notify applicant
+    bot = request.app.get(BOT_KEY)
+    biz = approved.get("business") or {}
+    if bot:
+        try:
+            markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📱 Open Store Dashboard", web_app=WebAppInfo(url=config.WEBAPP_URL + "/"))]
+            ]) if config.WEBAPP_URL else None
+            await bot.send_message(
+                approved["tg_id"],
+                f"🎉 <b>Congratulations! Your Business Owner Request was APPROVED!</b>\n\n"
+                f"• Store: <b>{html.escape(approved['business_name'])}</b>\n"
+                f"• Cashier Join Code: <code>{html.escape(biz.get('code', ''))}</code>\n\n"
+                f"You now have full access as the <b>Store Owner</b>!\n"
+                f"Tap the button below to open your dashboard, set payment accounts, and approve cashiers:",
+                reply_markup=markup,
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    return web.json_response({"ok": True, "request": approved})
+
+
+async def api_reject_business_request(request: web.Request) -> web.Response:
+    uid = request["user"]["id"]
+    if not db.is_superadmin(uid):
+        raise web.HTTPForbidden(text="Only platform admin can reject business requests")
+    req_id = int(request.match_info["id"])
+    rejected = db.reject_business_request(req_id, uid)
+    if not rejected:
+        raise web.HTTPNotFound(text="Request not found or already processed")
+
+    # Notify applicant
+    bot = request.app.get(BOT_KEY)
+    if bot:
+        try:
+            await bot.send_message(
+                rejected["tg_id"],
+                f"ℹ️ Your request to register <b>{html.escape(rejected['business_name'])}</b> as a store owner was not approved at this time.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    return web.json_response({"ok": True, "request": rejected})
 
 
 async def api_businesses(request: web.Request) -> web.Response:
@@ -699,6 +837,10 @@ async def start_web(bot) -> web.AppRunner:
         web.get("/api/me", api_me),
         web.post("/api/switch-business", api_switch_active_business),
         web.post("/api/join", api_join_business),
+        web.post("/api/request-business", api_request_business),
+        web.get("/api/business-requests", api_list_business_requests),
+        web.post("/api/business-requests/{id:\\d+}/approve", api_approve_business_request),
+        web.post("/api/business-requests/{id:\\d+}/reject", api_reject_business_request),
         web.get("/api/businesses", api_businesses),
         web.post("/api/businesses", api_create_business),
         web.put("/api/business/{id:\\d+}", api_update_business),

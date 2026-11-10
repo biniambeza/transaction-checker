@@ -110,7 +110,8 @@ async def notify_business_owners(bot, business_id: int, text: str, markup=None, 
     """Delivers alerts specifically to the owners of the business."""
     owners = db.get_business_owners(business_id)
     owner_ids = {o["tg_id"] for o in owners}
-    owner_ids.update(config.OWNER_IDS)
+    if not owner_ids:
+        owner_ids = set(config.OWNER_IDS)
 
     photo_file = (config.PHOTOS_DIR / photo_path) if photo_path else None
 
@@ -354,14 +355,27 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.reply_html(f"👋 Welcome back! Active store: <b>{H(name)}</b>\n\n" + WAITER_HELP,
                              reply_markup=dashboard_markup())
     else:
-        await msg.reply_html(
-            f"👋 <b>Welcome to Kifiya Transaction Checker!</b>\n\n"
-            f"Your Telegram User ID is: <code>{u.id}</code>\n\n"
-            f"🔒 <b>Cashier Access:</b>\n"
-            f"Share your Telegram ID (<code>{u.id}</code>) with your store owner so they can register you in their dashboard.\n\n"
-            f"Or tap <b>📱 Open Dashboard</b> below to enter your store's join code and request access!",
-            reply_markup=dashboard_markup()
-        )
+        pending_biz = db.get_user_pending_business_request(u.id)
+        if pending_biz:
+            await msg.reply_html(
+                f"⏳ <b>Your Business Request is Pending Review</b>\n\n"
+                f"• Store Name: <b>{H(pending_biz['business_name'])}</b>\n"
+                f"• Category: <b>{H(pending_biz.get('category') or 'General')}</b>\n"
+                f"• Desired Code: <code>{H(pending_biz.get('code') or 'auto')}</code>\n\n"
+                f"Your request has been submitted to the platform admin. "
+                f"You will receive a notification as soon as it is approved!",
+                reply_markup=dashboard_markup()
+            )
+        else:
+            await msg.reply_html(
+                f"👋 <b>Welcome to Kifiya Transaction Checker!</b>\n\n"
+                f"Your Telegram User ID is: <code>{u.id}</code>\n\n"
+                f"📱 <b>Get Started:</b>\n"
+                f"Tap the button below to open the portal and submit a request:\n"
+                f"• 🏢 <b>Request to Register as Business Owner</b> (Cafe, Supermarket, Restaurant)\n"
+                f"• 🛒 <b>Or Join as a Cashier</b> using your store's code.",
+                reply_markup=dashboard_markup()
+            )
 
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -528,6 +542,58 @@ async def on_switch_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
             )
         except TelegramError:
             pass
+    elif data.startswith("biz_req_appr:"):
+        req_id = int(data.split(":")[1])
+        if not is_superadmin(query.from_user.id):
+            await query.answer("Only platform admin can approve business owners.", show_alert=True)
+            return
+        approved = db.approve_business_request(req_id, query.from_user.id)
+        if approved:
+            biz = approved.get("business") or {}
+            await query.edit_message_text(
+                f"✅ <b>Approved by Platform Admin!</b>\n\n"
+                f"• Store: <b>{H(approved['business_name'])}</b> (#<code>{biz.get('id')}</code>)\n"
+                f"• Owner: <b>{H(approved['user_name'])}</b> (ID: <code>{approved['tg_id']}</code>)\n"
+                f"• Cashier Join Code: <code>{H(biz.get('code', ''))}</code>\n\n"
+                f"The business owner has been notified and granted full access.",
+                parse_mode="HTML"
+            )
+            try:
+                await ctx.bot.send_message(
+                    approved["tg_id"],
+                    f"🎉 <b>Congratulations! Your Business Owner Request was APPROVED!</b>\n\n"
+                    f"• Store: <b>{H(approved['business_name'])}</b>\n"
+                    f"• Cashier Join Code: <code>{H(biz.get('code', ''))}</code>\n\n"
+                    f"You now have full access as the <b>Store Owner</b>!\n"
+                    f"Tap the button below to open your dashboard, set payment accounts, and approve cashiers:",
+                    reply_markup=dashboard_markup(),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+        else:
+            await query.answer("Request not found or already processed.", show_alert=True)
+    elif data.startswith("biz_req_decl:"):
+        req_id = int(data.split(":")[1])
+        if not is_superadmin(query.from_user.id):
+            await query.answer("Only platform admin can decline business owners.", show_alert=True)
+            return
+        rejected = db.reject_business_request(req_id, query.from_user.id)
+        if rejected:
+            await query.edit_message_text(
+                f"❌ <b>Declined:</b> Request for <b>{H(rejected['business_name'])}</b> by {H(rejected['user_name'])} was declined.",
+                parse_mode="HTML"
+            )
+            try:
+                await ctx.bot.send_message(
+                    rejected["tg_id"],
+                    f"ℹ️ Your request to register <b>{H(rejected['business_name'])}</b> as a store owner was not approved at this time.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+        else:
+            await query.answer("Request not found or already processed.", show_alert=True)
 
 
 async def cmd_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:

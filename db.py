@@ -70,6 +70,23 @@ CREATE TABLE IF NOT EXISTS days (
     updated_at  TEXT,
     PRIMARY KEY (business_id, day)
 );
+CREATE TABLE IF NOT EXISTS business_requests (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id         INTEGER NOT NULL,
+    user_name     TEXT,
+    username      TEXT,
+    business_name TEXT NOT NULL,
+    category      TEXT,
+    phone         TEXT,
+    code          TEXT,
+    cbe           TEXT,
+    telebirr      TEXT,
+    names         TEXT,
+    status        TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+    created_at    TEXT NOT NULL,
+    reviewed_at   TEXT,
+    reviewed_by   INTEGER
+);
 """
 INDEXES = """
 CREATE INDEX IF NOT EXISTS ix_payments_biz_day ON payments(business_id, day);
@@ -80,6 +97,8 @@ CREATE INDEX IF NOT EXISTS ix_payments_ref ON payments(tx_ref);
 CREATE INDEX IF NOT EXISTS ix_biz_code ON businesses(code);
 CREATE INDEX IF NOT EXISTS ix_biz_waiters_user ON business_waiters(tg_id);
 CREATE INDEX IF NOT EXISTS ix_biz_owners_user ON business_owners(tg_id);
+CREATE INDEX IF NOT EXISTS ix_biz_req_status ON business_requests(status);
+CREATE INDEX IF NOT EXISTS ix_biz_req_user ON business_requests(tg_id);
 """
 
 
@@ -285,6 +304,72 @@ def get_user_owned_businesses(tg_id: int) -> list[dict]:
     return _query("""SELECT b.* FROM businesses b
                      JOIN business_owners bo ON bo.business_id = b.id
                      WHERE bo.tg_id=? AND b.active=1 ORDER BY b.name""", (tg_id,))
+
+
+# ---------------------------------------------------------------- business owner registration requests
+def create_business_request(tg_id: int, user_name: str, username: str | None,
+                            business_name: str, category: str = "", phone: str = "",
+                            code: str = "", cbe: str = "", telebirr: str = "", names: str = "") -> int:
+    return _exec("""INSERT INTO business_requests
+                    (tg_id, user_name, username, business_name, category, phone, code, cbe, telebirr, names, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                 (tg_id, user_name, username, business_name.strip(), category.strip(), phone.strip(),
+                  code.strip().lower(), cbe.strip(), telebirr.strip(), names.strip(), config.now_utc().isoformat()))
+
+
+def get_business_request(req_id: int) -> dict | None:
+    return _one("SELECT * FROM business_requests WHERE id=?", (req_id,))
+
+
+def get_user_pending_business_request(tg_id: int) -> dict | None:
+    return _one("SELECT * FROM business_requests WHERE tg_id=? AND status='pending' ORDER BY id DESC LIMIT 1", (tg_id,))
+
+
+def list_pending_business_requests() -> list[dict]:
+    return _query("SELECT * FROM business_requests WHERE status='pending' ORDER BY id DESC")
+
+
+def list_all_business_requests() -> list[dict]:
+    return _query("SELECT * FROM business_requests ORDER BY id DESC")
+
+
+def approve_business_request(req_id: int, admin_tg_id: int) -> dict | None:
+    req = get_business_request(req_id)
+    if not req or req["status"] != "pending":
+        return None
+    # Combine CBE & telebirr accounts
+    cbe_clean = re.sub(r"\D", "", req["cbe"] or "")
+    tb_clean = re.sub(r"\D", "", req["telebirr"] or "")
+    accounts = ",".join(x for x in (cbe_clean, tb_clean) if x)
+
+    # Create the business
+    bid = create_business(
+        name=req["business_name"],
+        code=req["code"] or None,
+        accounts=accounts,
+        names=req["names"] or ""
+    )
+    # Assign the requester as owner
+    add_business_owner(bid, req["tg_id"])
+    upsert_user(req["tg_id"], req["user_name"] or str(req["tg_id"]), req["username"], "owner")
+    set_user_active_business(req["tg_id"], bid)
+
+    # Update request status
+    now = config.now_utc().isoformat()
+    _exec("UPDATE business_requests SET status='approved', reviewed_at=?, reviewed_by=? WHERE id=?", (now, admin_tg_id, req_id))
+
+    biz = get_business(bid)
+    req["business"] = biz
+    return req
+
+
+def reject_business_request(req_id: int, admin_tg_id: int) -> dict | None:
+    req = get_business_request(req_id)
+    if not req or req["status"] != "pending":
+        return None
+    now = config.now_utc().isoformat()
+    _exec("UPDATE business_requests SET status='rejected', reviewed_at=?, reviewed_by=? WHERE id=?", (now, admin_tg_id, req_id))
+    return req
 
 
 # ---------------------------------------------------------------- waiters per business

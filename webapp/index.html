@@ -63,7 +63,7 @@
   .form-help { font-size: 11.5px; color: var(--hint); margin-top: 3px; }
 
   .notice-box { background: color-mix(in srgb, var(--link) 10%, var(--bg)); border-left: 4px solid var(--link);
-                border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; }
+                border-radius: 8px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 12px; line-height: 1.45; }
   .notice-box.warn { background: color-mix(in srgb, var(--warn) 10%, var(--bg)); border-left-color: var(--warn); }
   .notice-box.ok { background: color-mix(in srgb, var(--ok) 10%, var(--bg)); border-left-color: var(--ok); }
 
@@ -142,9 +142,12 @@
 
     <!-- Navigation Tabs for BOT OWNER (Super Admin) -->
     <nav class="main-nav" id="navBotOwner" style="display:none;">
-      <button class="nav-btn active" data-tab="tabBotStores">🏢 Client Businesses & Owners</button>
-      <button class="nav-btn" data-tab="tabBotOnboard">➕ Onboard Business Owner</button>
-      <button class="nav-btn" data-tab="tabSales" id="navBotSales">📊 Store Sales Ledger</button>
+      <button class="nav-btn active" data-tab="tabBotStores">🏢 Client Stores</button>
+      <button class="nav-btn" data-tab="tabBotRequests" id="navBotRequests">
+        ⏳ Owner Requests <span id="reqBadge" style="display:none; background:var(--bad); color:#fff; border-radius:10px; padding:1px 6px; font-size:11px; margin-left:2px;"></span>
+      </button>
+      <button class="nav-btn" data-tab="tabBotOnboard">➕ Onboard Owner</button>
+      <button class="nav-btn" data-tab="tabSales" id="navBotSales">📊 Store Ledger</button>
     </nav>
 
     <!-- Navigation Tabs for BUSINESS OWNER -->
@@ -162,7 +165,6 @@
     <!-- ==================== TIER 1: BOT OWNER TABS ==================== -->
     <!-- Tab: Registered Businesses & Owners List -->
     <div id="tabBotStores" class="tab-pane" style="display:none;">
-      <!-- Platform Stats Cards -->
       <section class="card" id="platformStatsCard">
         <h2>⚡ Platform Overview</h2>
         <div class="stats" id="platformStats"></div>
@@ -180,22 +182,33 @@
       </section>
     </div>
 
-    <!-- Tab: Onboard Business Owner -->
+    <!-- Tab: Pending Business Owner Requests -->
+    <div id="tabBotRequests" class="tab-pane" style="display:none;">
+      <section class="card">
+        <h2>⏳ Pending Business Owner Applications</h2>
+        <div class="notice-box">
+          👑 <b>Review Client Applications:</b> Users who started the bot and submitted a request to register their cafe or supermarket appear here. Approve them to grant instant Store Owner access.
+        </div>
+        <div id="pendingBizRequestsList">Loading applications…</div>
+      </section>
+    </div>
+
+    <!-- Tab: Onboard Business Owner Manually -->
     <div id="tabBotOnboard" class="tab-pane" style="display:none;">
       <section class="card">
         <h2>🏢 Register & Onboard Business Owner</h2>
         <div class="notice-box">
-          👑 <b>Register New Client:</b> Enter the cafe or supermarket details and assign their Telegram ID. They will immediately receive access to their Business Owner dashboard.
+          👑 <b>Direct Onboard:</b> Enter the client details and assign their Telegram ID. They will immediately receive access to their Business Owner dashboard.
         </div>
 
         <form id="formNewBusiness">
           <div class="form-group">
-            <label>Business / Store Name</label>
+            <label>Business / Store Name *</label>
             <input type="text" id="inpNewBizName" placeholder="e.g. Friendship Supermarket" required>
           </div>
 
           <div class="form-group">
-            <label>Owner Telegram ID or @Username</label>
+            <label>Owner Telegram ID or @Username *</label>
             <input type="text" id="inpNewBizOwner" placeholder="e.g. 987654321 or @client_owner" required>
             <div class="form-help">Ask the client to send /start to @kifiya_checker_bot to see their Telegram ID.</div>
           </div>
@@ -330,6 +343,11 @@
 
     <!-- Tab: Cashiers Management (EXCLUSIVE TO STORE OWNER) -->
     <div id="tabWaiters" class="tab-pane" style="display:none;">
+      <div class="notice-box ok" id="ownerCodeNotice" style="margin-bottom:12px;">
+        🔑 <b>Store Join Code:</b> <code id="dispBizCode" style="font-size:14px; font-weight:700;">loading…</code><br>
+        Share this code with your cashiers so they can request to join your store from the bot.
+      </div>
+
       <section class="card">
         <h2>➕ Register a New Cashier / Waiter</h2>
         <div class="notice-box">
@@ -355,7 +373,7 @@
 
       <!-- Pending Approval Requests -->
       <section class="card" id="pendingWaitersCard" style="display:none;">
-        <h2 style="color:var(--warn)">⏳ Pending Join Requests</h2>
+        <h2 style="color:var(--warn)">⏳ Pending Cashier Join Requests</h2>
         <div id="pendingWaitersList"></div>
       </section>
 
@@ -435,50 +453,157 @@ async function init() {
     roleBadge.textContent = me.role === "superadmin" ? "Platform Owner 👑" :
                            (me.role === "owner" ? "Store Owner 🏢" : (me.role === "waiter" ? "Cashier 🛒" : "Guest"));
 
-    // If User has no businesses or roles yet -> GUEST VIEW
+    // If User has no businesses or roles yet -> ONBOARDING & REQUEST PORTAL
     const stores = me.owned_businesses.length ? me.owned_businesses : me.waiter_businesses;
     if (!stores.length && !me.is_superadmin) {
+      const pendingReq = me.pending_business_request;
       $("#msg").innerHTML = `
-        <div class="card" style="text-align:center; padding: 24px 16px;">
-          <h2 style="font-size:16px; margin-bottom:8px; color:var(--text);">👋 Welcome to Transaction Checker</h2>
-          <p style="color:var(--hint); font-size:13px; line-height:1.5; margin: 0 0 16px;">
-            Your Telegram User ID is: <b style="color:var(--text); font-family:monospace; font-size:14px; background:var(--bg2); padding:2px 6px; border-radius:4px;">${me.id}</b><br>
-            Give this ID to your store owner so they can register you in their dashboard.
-          </p>
-          <div style="border-top:1px solid var(--bg2); padding-top:16px; text-align:left;">
-            <h3 style="font-size:12px; text-transform:uppercase; color:var(--hint); margin:0 0 10px; font-weight:600;">Or Request to Join Store</h3>
+        <div style="max-width:540px; margin:0 auto; padding-top:10px;">
+          <div style="text-align:center; margin-bottom:16px;">
+            <h1 style="font-size:20px; font-weight:800; margin:0 0 6px;">👋 Welcome to Kifiya</h1>
+            <p style="color:var(--hint); font-size:13px; margin:0;">
+              Your Telegram User ID: <code style="font-size:14px; background:var(--bg); padding:2px 8px; border-radius:6px; font-weight:700; color:var(--text);">${me.user_id}</code>
+            </p>
+          </div>
+
+          ${pendingReq ? `
+            <div class="notice-box warn" style="margin-bottom:14px;">
+              ⏳ <b>Business Owner Application Under Review</b><br>
+              Your request to register <b>${esc(pendingReq.business_name)}</b> is currently pending approval by the platform admin. You will receive a notification in Telegram as soon as your store is approved!
+            </div>
+          ` : ""}
+
+          <div class="period-tabs" style="margin-bottom:14px;">
+            <button class="period-tab active" id="btnTabGuestBiz">🏢 Register as Business Owner</button>
+            <button class="period-tab" id="btnTabGuestWaiter">🛒 Join Store as Cashier</button>
+          </div>
+
+          <!-- Option 1: Business Owner Request Form -->
+          <div id="paneGuestBiz" class="card" style="${pendingReq ? 'display:none;' : ''}">
+            <h2>🏢 Request to Register as Business Owner</h2>
+            <div class="notice-box">
+              Register your cafe, supermarket, or shop. Your application will be sent to the platform admin. Once approved, you gain full control as Store Owner!
+            </div>
+            <form id="formReqBiz">
+              <div class="form-group">
+                <label>Business / Store Name *</label>
+                <input type="text" id="inpReqBizName" placeholder="e.g. Bole Branch Cafe" required>
+              </div>
+              <div class="form-group">
+                <label>Business Category</label>
+                <select id="inpReqBizCat">
+                  <option value="Cafe">☕ Cafe / Coffee Shop</option>
+                  <option value="Supermarket">🛒 Supermarket / Grocery</option>
+                  <option value="Restaurant">🍽️ Restaurant</option>
+                  <option value="Retail">🛍️ Retail Store / Shop</option>
+                  <option value="Other">🏢 Other Business</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Contact Phone Number *</label>
+                <input type="tel" id="inpReqBizPhone" placeholder="e.g. 0911223344" required>
+              </div>
+              <div class="form-group">
+                <label>Desired Store Code</label>
+                <input type="text" id="inpReqBizCode" placeholder="e.g. bolecafe (letters & numbers only)">
+                <div class="form-help">Your cashiers will use this code to join your store.</div>
+              </div>
+              <div class="form-group">
+                <label>CBE 13-digit Account Number (optional)</label>
+                <input type="text" id="inpReqBizCbe" placeholder="e.g. 1000123456076">
+              </div>
+              <div class="form-group">
+                <label>telebirr Phone or Merchant Till (optional)</label>
+                <input type="text" id="inpReqBizTb" placeholder="e.g. 0911223344 or 582910">
+              </div>
+              <div class="form-group">
+                <label>Legal Account Holder Name(s) (optional)</label>
+                <input type="text" id="inpReqBizNames" placeholder="e.g. Bole Cafe PLC, Abebe Kebede">
+              </div>
+              <button type="submit" class="ok" style="width:100%; padding:12px; font-size:14px;">🚀 Submit Application to Admin</button>
+            </form>
+          </div>
+
+          <!-- Option 2: Cashier Join Form -->
+          <div id="paneGuestWaiter" class="card" style="${pendingReq ? '' : 'display:none;'}">
+            <h2>🛒 Request to Join Store as Cashier</h2>
+            <div class="notice-box">
+              Ask your cafe or supermarket owner for their <b>Store Code</b>, then enter it below. Your join request will be sent to your store owner for 1-tap approval.
+            </div>
             <form id="formGuestJoin">
               <div class="form-group">
-                <label>Store Join Code</label>
+                <label>Store Code *</label>
                 <input type="text" id="inpGuestCode" placeholder="e.g. bolecafe" required>
+                <div class="form-help">The join code provided by your business owner.</div>
               </div>
               <div class="form-group">
-                <label>Your Counter / Display Name</label>
+                <label>Your Counter / Display Name *</label>
                 <input type="text" id="inpGuestName" placeholder="e.g. Counter 1 - Meron" required>
               </div>
-              <button type="submit" class="ok" style="width:100%; padding:11px;">Request Access</button>
+              <button type="submit" class="ok" style="width:100%; padding:12px; font-size:14px;">🛒 Request Cashier Access</button>
             </form>
           </div>
         </div>
       `;
+
+      const bBiz = document.getElementById("btnTabGuestBiz");
+      const bWaiter = document.getElementById("btnTabGuestWaiter");
+      const pBiz = document.getElementById("paneGuestBiz");
+      const pWaiter = document.getElementById("paneGuestWaiter");
+
+      bBiz.addEventListener("click", () => {
+        bBiz.classList.add("active");
+        bWaiter.classList.remove("active");
+        pBiz.style.display = "block";
+        pWaiter.style.display = "none";
+      });
+
+      bWaiter.addEventListener("click", () => {
+        bWaiter.classList.add("active");
+        bBiz.classList.remove("active");
+        pWaiter.style.display = "block";
+        pBiz.style.display = "none";
+      });
+
+      const formReqBiz = document.getElementById("formReqBiz");
+      if (formReqBiz) {
+        formReqBiz.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const body = {
+            business_name: $("#inpReqBizName").value.trim(),
+            category: $("#inpReqBizCat").value,
+            phone: $("#inpReqBizPhone").value.trim(),
+            code: $("#inpReqBizCode").value.trim(),
+            cbe: $("#inpReqBizCbe").value.trim(),
+            telebirr: $("#inpReqBizTb").value.trim(),
+            names: $("#inpReqBizNames").value.trim(),
+          };
+          try {
+            const res = await api("api/request-business", "POST", body);
+            haptic("success");
+            alertMsg(res.message || "Request submitted to platform admin!");
+            location.reload();
+          } catch (err) { alertMsg(err.message); }
+        });
+      }
+
       document.getElementById("formGuestJoin").addEventListener("submit", async (e) => {
         e.preventDefault();
         const code = document.getElementById("inpGuestCode").value.trim();
         const name = document.getElementById("inpGuestName").value.trim();
         try {
-          const res = await api("api/join", "POST", {code, name});
+          const res = await api("api/join", "POST", { code, name });
           haptic("success");
           alertMsg(res.message || "Registration request sent to store owner!");
-        } catch (err) {
-          alertMsg(err.message);
-        }
+        } catch (err) { alertMsg(err.message); }
       });
+
       return;
     }
 
     state.activeBizId = me.active_business_id || (stores.length ? stores[0].id : 1);
 
-    // Populate business switcher if multiple
+    // Business switcher
     if (stores.length > 1 || me.is_superadmin) {
       const bSel = $("#bizSelect");
       bSel.style.display = "inline-block";
@@ -486,16 +611,15 @@ async function init() {
       bSel.value = state.activeBizId;
     }
 
-    // Role-based Nav & View Setup
+    // Role Navigation
     if (me.is_superadmin) {
-      // 1. BOT OWNER TIER
       $("#navBotOwner").style.display = "flex";
       $("#bizTitle").textContent = "Platform Control";
       switchTab("tabBotStores");
       await loadAllStores();
       await loadPlatformStats();
+      await loadPendingBizRequests();
     } else if (me.role === "owner") {
-      // 2. BUSINESS OWNER TIER
       $("#navStoreOwner").style.display = "flex";
       $("#verifyAll").style.display = "inline-block";
       $("#secWaitersBreakdown").style.display = "block";
@@ -506,7 +630,6 @@ async function init() {
       await loadAccountsForm();
       await loadWaitersTab();
     } else {
-      // 3. CASHIER TIER
       $("#cashierBanner").style.display = "block";
       $("#btnPdf").style.display = "none";
       $("#export").style.display = "none";
@@ -541,8 +664,59 @@ async function loadPlatformStats() {
       <div class="stat"><div class="v">${s.total_cashiers}</div><div class="l">👥 Active Cashiers</div></div>
       <div class="stat"><div class="v" style="color:var(--ok)">${money(s.total_verified_amount)}</div><div class="l">💰 Verified Sales (${s.total_verified_tx} tx)</div></div>
     `;
+  } catch (err) { console.error(err); }
+}
+
+async function loadPendingBizRequests() {
+  try {
+    const res = await api("api/business-requests");
+    const pending = res.pending || [];
+    const badge = $("#reqBadge");
+    if (badge) {
+      if (pending.length) {
+        badge.style.display = "inline-block";
+        badge.textContent = pending.length;
+      } else {
+        badge.style.display = "none";
+      }
+    }
+    const container = $("#pendingBizRequestsList");
+    if (!container) return;
+    if (pending.length) {
+      container.innerHTML = pending.map((r) => `
+        <div class="card" style="margin-bottom:12px; border:1px solid var(--bg2);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+            <div>
+              <h3 style="margin:0; font-size:16px; font-weight:700;">${esc(r.business_name)}</h3>
+              <div style="font-size:12px; color:var(--hint); margin-top:2px;">
+                Category: <b>${esc(r.category || "General")}</b> · Desired Code: <code>${esc(r.code || "auto")}</code>
+              </div>
+            </div>
+            <span class="badge b-pending">PENDING</span>
+          </div>
+
+          <div style="background:var(--bg2); padding:10px; border-radius:8px; font-size:12.5px; margin-bottom:10px; line-height:1.5;">
+            <div>👤 <b>Applicant:</b> ${esc(r.user_name)} (ID: <code>${r.tg_id}</code>${r.username ? ` · @${esc(r.username)}` : ""})</div>
+            <div>📞 <b>Phone:</b> ${esc(r.phone || "Not provided")}</div>
+            ${r.cbe ? `<div>🏦 <b>CBE Account:</b> <code>${esc(r.cbe)}</code></div>` : ""}
+            ${r.telebirr ? `<div>📱 <b>telebirr:</b> <code>${esc(r.telebirr)}</code></div>` : ""}
+            ${r.names ? `<div>🏷️ <b>Legal Name:</b> ${esc(r.names)}</div>` : ""}
+            <div style="font-size:11px; color:var(--hint); margin-top:4px;">Submitted: ${esc(r.created_at?.slice(0, 16).replace("T", " "))}</div>
+          </div>
+
+          <div style="display:flex; gap:8px;">
+            <button class="small ok" data-bizreq-act="approve" data-reqid="${r.id}">✅ Approve Business Owner</button>
+            <button class="small bad" data-bizreq-act="reject" data-reqid="${r.id}">❌ Decline</button>
+          </div>
+        </div>
+      `).join("");
+    } else {
+      container.innerHTML = `<div class="empty">No pending business owner applications right now.</div>`;
+    }
   } catch (err) {
-    console.error(err);
+    if ($("#pendingBizRequestsList")) {
+      $("#pendingBizRequestsList").innerHTML = `<div class="empty" style="color:var(--bad)">${esc(err.message)}</div>`;
+    }
   }
 }
 
@@ -581,7 +755,6 @@ async function loadAllStores() {
             </button>
           </div>
 
-          <!-- Inline Edit Form -->
           <div id="editBizForm_${b.id}" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid var(--bg2);">
             <div class="form-group">
               <label>Store Name</label>
@@ -624,9 +797,11 @@ async function loadReport() {
     if (state.me.role !== "superadmin") {
       $("#bizTitle").textContent = d.business.name;
     }
+    if ($("#dispBizCode")) {
+      $("#dispBizCode").textContent = d.business.code;
+    }
     populatePeriodOptions(d.recent_periods, d.period_type, d.period_value);
     
-    // Bank check is for store owner only in daily view
     const isOwner = state.me && (state.me.is_superadmin || state.me.role === "owner");
     $("#bankCheckSection").style.display = (isOwner && state.periodType === "day") ? "block" : "none";
 
@@ -671,14 +846,12 @@ function render() {
   $("#kpiHeading").textContent = isWaiter ? `My Sales Summary — ${pLabel}` : `Sales Summary — ${pLabel}`;
 
   if (isWaiter) {
-    // CASHIER TIER: Only show cashier's own numbers!
     $("#stats").innerHTML = `
       <div class="stat big"><div class="v" style="color:var(--ok)">${money(s.verified.total)}</div><div class="l">✅ My Verified Sales · ${s.verified.count}</div></div>
       <div class="stat"><div class="v">${money(s.pending.total)}</div><div class="l">⏳ Pending · ${s.pending.count}</div></div>
       <div class="stat"><div class="v">${s.claimed.count}</div><div class="l">🔢 My Total Transactions</div></div>
     `;
   } else {
-    // BUSINESS OWNER / SUPERADMIN TIER: Full store breakdown
     $("#stats").innerHTML = `
       <div class="stat big"><div class="v">${money(s.claimed.total)}</div><div class="l">Claimed total · ${s.claimed.count} sales</div></div>
       <div class="stat"><div class="v" style="color:var(--ok)">${money(s.verified.total)}</div><div class="l">✅ Verified real · ${s.verified.count}</div></div>
@@ -690,7 +863,6 @@ function render() {
       ${s.missing_amount || s.missing_ref ? `<div class="stat big"><div class="l" style="color:var(--warn)">❓ ${s.missing_amount} without amount · ${s.missing_ref} without code</div></div>` : ""}`;
   }
 
-  // Reconciliation for owner
   if (!isWaiter && period_type === "day") {
     if (document.activeElement !== $("#bank")) $("#bank").value = s.bank_total ?? "";
     const diff = $("#diff");
@@ -702,7 +874,6 @@ function render() {
     }
   }
 
-  // Breakdown tables (Owner only)
   if (!isWaiter) {
     $("#waiters").innerHTML = (s.by_waiter && s.by_waiter.length) ? s.by_waiter.map((w) =>
       `<tr><td><strong>${esc(w.name)}</strong></td><td class="n">${w.count}</td><td class="n"><strong>${money(w.total)}</strong></td><td class="n" style="color:var(--ok)">${money(w.verified)}</td></tr>`).join("")
@@ -718,11 +889,9 @@ function render() {
       : `<tr><td colspan="3" class="empty">No bank breakdown</td></tr>`;
   }
 
-  // Filter chips
   $("#chips").innerHTML = FILTERS.map(([key, label, fn]) =>
     `<button class="chip ${state.filter === key ? "on" : ""}" data-filter="${key}">${label} ${payments.filter(fn).length}</button>`).join("");
 
-  // Ledger list
   const fn = FILTERS.find((f) => f[0] === state.filter)[2];
   const q = state.q.toLowerCase();
   const rows = payments.filter(fn).filter((p) => !q ||
@@ -796,9 +965,7 @@ $("#formAccounts").addEventListener("submit", async (e) => {
     haptic("success");
     alertMsg("✅ Payment accounts & fraud rules saved successfully!");
     await loadReport();
-  } catch (err) {
-    alertMsg(err.message);
-  }
+  } catch (err) { alertMsg(err.message); }
 });
 
 async function loadWaitersTab() {
@@ -841,7 +1008,7 @@ async function loadWaitersTab() {
         </div>
       `).join("");
     } else {
-      $("#registeredWaitersList").innerHTML = `<div class="empty">No registered cashiers yet. Register one above!</div>`;
+      $("#registeredWaitersList").innerHTML = `<div class="empty">No registered cashiers yet. Register one above or share your store code!</div>`;
     }
   } catch (err) {
     $("#registeredWaitersList").innerHTML = `<div class="empty" style="color:var(--bad);">${esc(err.message)}</div>`;
@@ -859,14 +1026,12 @@ $("#formAddWaiter").addEventListener("submit", async (e) => {
     $("#inpWaiterId").value = "";
     $("#inpCounterName").value = "";
     await loadWaitersTab();
-  } catch (err) {
-    alertMsg(err.message);
-  }
+  } catch (err) { alertMsg(err.message); }
 });
 
 // -------------------- EVENT LISTENERS --------------------
 document.addEventListener("click", async (e) => {
-  // Cashier action
+  // Cashier approval/decline by Store Owner
   const wBtn = e.target.closest("[data-waiter-act]");
   if (wBtn) {
     const act = wBtn.dataset.waiterAct;
@@ -886,6 +1051,29 @@ document.addEventListener("click", async (e) => {
       }
       await loadWaitersTab();
     } catch (err) { alertMsg(err.message); wBtn.disabled = false; }
+    return;
+  }
+
+  // Business Request approval/decline by Bot Owner (Super Admin)
+  const brBtn = e.target.closest("[data-bizreq-act]");
+  if (brBtn) {
+    const act = brBtn.dataset.bizreqAct;
+    const reqId = brBtn.dataset.reqid;
+    try {
+      brBtn.disabled = true;
+      if (act === "approve") {
+        await api(`api/business-requests/${reqId}/approve`, "POST");
+        haptic("success");
+        alertMsg("✅ Business owner request approved! Store created and owner notified.");
+      } else {
+        await api(`api/business-requests/${reqId}/reject`, "POST");
+        haptic("warning");
+        alertMsg("Request declined.");
+      }
+      await loadPendingBizRequests();
+      await loadAllStores();
+      await loadPlatformStats();
+    } catch (err) { alertMsg(err.message); brBtn.disabled = false; }
     return;
   }
 
@@ -927,7 +1115,7 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-// Bot Owner Form Submit
+// Bot Owner Form Submit (Direct Onboard)
 $("#formNewBusiness").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
@@ -951,19 +1139,15 @@ $("#formNewBusiness").addEventListener("submit", async (e) => {
     switchTab("tabBotStores");
     await loadAllStores();
     await loadPlatformStats();
-  } catch (err) {
-    alertMsg(err.message);
-  }
+  } catch (err) { alertMsg(err.message); }
 });
 
 $("#btnGoOnboard").addEventListener("click", () => switchTab("tabBotOnboard"));
 
-// Nav clicks
 document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
-// Period tabs
 document.querySelectorAll(".period-tab").forEach((tab) => {
   tab.addEventListener("click", async () => {
     document.querySelectorAll(".period-tab").forEach((t) => t.classList.remove("active"));
@@ -1004,6 +1188,7 @@ $("#refresh").addEventListener("click", async () => {
   if (state.me.is_superadmin) {
     await loadAllStores();
     await loadPlatformStats();
+    await loadPendingBizRequests();
   }
   await loadReport();
   if (state.me.role === "owner") {
